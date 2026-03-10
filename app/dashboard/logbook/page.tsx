@@ -181,18 +181,17 @@ export default function LogbookPage() {
       itemIds: selectedItems.map(item => Number(item.id)), // Siguradong number
     };
 
-    const result = await useEquipment(payload);
-    
-    if (result.success) {
-      setIsAddModalOpen(false);
-      setSelectedItems([]);
-      await fetchData();
-    } else {
-      alert(result.error || "Failed to save record");
-    }
-    
-    setIsSubmitting(false);
-  };
+const result = await useEquipment(payload);
+
+if (result.success) {
+  setIsAddModalOpen(false);
+  setSelectedItems([]);
+  await fetchData();
+} else {
+  // Use a type assertion or a safe access check
+  const errorMessage = (result as { error?: string }).error || "Failed to save record";
+  alert(errorMessage);
+}
 
   const handleBatchReturn = async () => {
     if (checkedItems.length === 0 || !manualReturnDate) return alert("Pumili ng items at petsa.");
