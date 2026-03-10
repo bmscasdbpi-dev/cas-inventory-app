@@ -22,6 +22,10 @@ interface LogEntry {
   itemId: number;
   dateReturned: string | null;
   requestStatus: string;
+  // Idagdag itong mga sumusunod:
+  itemName?: string;      
+  itemCode?: string;      
+  serialNumber?: string;  
 }
 
 export default function LogbookPage() {
