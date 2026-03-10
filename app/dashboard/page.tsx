@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, Suspense } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/db/supabase"; 
 import { addItem, updateItem, deleteItem } from "@/actions/itemActions";
@@ -377,8 +377,10 @@ const downloadQRCode = () => {
     </div>
   );
 
+
   return (
     <div className="flex min-h-screen bg-[#FDFBFF] text-[#1A1C1E] font-sans overflow-x-hidden">
+  
   
   {/* SIDEBAR */}
       <aside 
