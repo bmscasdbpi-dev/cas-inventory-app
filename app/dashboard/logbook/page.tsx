@@ -1174,11 +1174,11 @@ const handleBatchReturn = async () => {
               <div className="flex justify-between items-center mb-2">
                 <p className="text-[10px] font-black uppercase tracking-widest text-gray-500">Scanned Items</p>
                 <span className="text-[10px] bg-blue-500/20 text-blue-400 px-2 py-0.5 rounded-full font-bold">
-                  {selectedBatch.items.filter(i => i.requestStatus === "Returned").length} Scanned
+                  {selectedBatch.items.filter((i: any) => i.requestStatus === "Returned").length} Scanned
                 </span>
               </div>
               <div className="max-h-32 overflow-y-auto custom-scrollbar-dark space-y-2 pr-2">
-                {selectedBatch.items.filter(i => i.requestStatus === "Returned").length > 0 ? (
+                {selectedBatch.items.filter((i: any) => i.requestStatus === "Returned").length > 0 ? (
                   [...selectedBatch.items].filter(i => i.requestStatus === "Returned").reverse().map((item, idx) => (
                     <div key={idx} className="flex items-center justify-between bg-white/5 p-2 rounded-xl border border-white/5 animate-in fade-in slide-in-from-top-1">
                       <div className="flex flex-col">
