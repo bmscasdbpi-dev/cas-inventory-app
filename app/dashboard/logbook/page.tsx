@@ -1423,34 +1423,56 @@ const handleBatchReturn = async () => {
             <div className="hidden md:block rounded-3xl border border-[#E0E2EC] bg-white overflow-hidden mb-4">
               <table className="w-full text-left border-collapse table-fixed">
                 <thead className="bg-[#F1F3F8] border-b border-[#E0E2EC]"><tr className="text-[10px] font-black text-[#44474E] uppercase tracking-widest"><th className="px-6 py-4 w-[25%]">Item Details</th><th className="px-6 py-4 w-[20%]">Serial Number</th><th className="px-6 py-4 w-[25%]">Item Status</th><th className="px-6 py-4 w-[30%]">Date Returned</th></tr></thead>
-                <tbody className="divide-y divide-[#E0E2EC]">
-                  {selectedBatch.items.map((item: LogEntry) => (
-                    <tr key={item.id} className="hover:bg-[#F8FAFF] transition-colors">
-                      <td className="px-6 py-4"><div><p className="font-bold text-black uppercase text-xs leading-tight">{item.itemName}</p><p className="text-[11px] font-bold text-blue-600 mt-0.5">{item.itemCode}</p></div></td>
-                      <td className="px-6 py-4"><span className="font-semibold text-[#74777F]">{item.serialNumber || '---'}</span></td>
-                      <td className="px-6 py-4">
-                        <select value={item.requestStatus} onChange={async (e) => {
-                          const newStatus = e.target.value;
-                          const today = new Date().toISOString().split('T')[0];
-                          const dateVal = newStatus === "Returned" ? today : null;
-                          const updatedItems = selectedBatch.items.map((i: LogEntry) => i.id === item.id ? { ...i, requestStatus: newStatus, dateReturned: dateVal } : i );
-                          setSelectedBatch({ ...selectedBatch, items: updatedItems });
-                          await updateSingleLogEntry(item.id, item.itemId, { requestStatus: newStatus, dateReturned: dateVal });
-                          await fetchData();
-                        }} className={`px-3 py-1.5 rounded-xl text-[10px] font-black uppercase cursor-pointer outline-none transition-all ${item.requestStatus === 'Returned' ? 'bg-[#C4EED0] text-[#002107]' : item.requestStatus === 'Missing' ? 'bg-[#FFECB3] text-[#7F5100]' : 'bg-[#FFDAD6] text-[#BA1A1A]'}`}>
-                          <option value="Not Yet Returned">Not Yet Returned</option><option value="Returned">Returned</option><option value="Missing">Missing</option>
-                        </select>
-                      </td>
-                      <td className="px-6 py-4"><input type="date" className="bg-[#F1F3F8] border-none rounded-lg px-3 py-2 text-xs font-bold outline-none w-full" value={item.dateReturned || ""} onChange={async (e) => {
-                        const val = e.target.value;
-                        const updatedItems = selectedBatch.items.map((i) => i.id === item.id ? { ...i, dateReturned: val || null, requestStatus: val ? "Returned" : "Not Yet Returned" } : i );
-                        setSelectedBatch({ ...selectedBatch, items: updatedItems });
-                        await updateSingleLogEntry(item.id, item.itemId, { dateReturned: val || null, requestStatus: val ? "Returned" : "Not Yet Returned" });
-                        await fetchData();
-                      }} /></td>
-                    </tr>
-                  ))}
-                </tbody>
+<tbody className="divide-y divide-[#E0E2EC]">
+  {selectedBatch.items.map((item: LogEntry) => (
+    <tr key={item.id} className="hover:bg-[#F8FAFF] transition-colors">
+      <td className="px-6 py-4">
+        <div>
+          <p className="font-bold text-black uppercase text-xs leading-tight">{item.itemName}</p>
+          <p className="text-[11px] font-bold text-blue-600 mt-0.5">{item.itemCode}</p>
+        </div>
+      </td>
+      <td className="px-6 py-4">
+        <span className="font-semibold text-[#74777F]">{item.serialNumber || '---'}</span>
+      </td>
+      <td className="px-6 py-4">
+        <select 
+          value={item.requestStatus} 
+          onChange={async (e) => {
+            const newStatus = e.target.value;
+            const today = new Date().toISOString().split('T')[0];
+            const dateVal = newStatus === "Returned" ? today : null;
+            // DITO (Dapat may : LogEntry)
+            const updatedItems = selectedBatch.items.map((i: LogEntry) => i.id === item.id ? { ...i, requestStatus: newStatus, dateReturned: dateVal } : i );
+            setSelectedBatch({ ...selectedBatch, items: updatedItems });
+            await updateSingleLogEntry(item.id, item.itemId, { requestStatus: newStatus, dateReturned: dateVal });
+            await fetchData();
+          }} 
+          className={`px-3 py-1.5 rounded-xl text-[10px] font-black uppercase cursor-pointer outline-none transition-all ${item.requestStatus === 'Returned' ? 'bg-[#C4EED0] text-[#002107]' : item.requestStatus === 'Missing' ? 'bg-[#FFECB3] text-[#7F5100]' : 'bg-[#FFDAD6] text-[#BA1A1A]'}`}
+        >
+          <option value="Not Yet Returned">Not Yet Returned</option>
+          <option value="Returned">Returned</option>
+          <option value="Missing">Missing</option>
+        </select>
+      </td>
+      <td className="px-6 py-4">
+        <input 
+          type="date" 
+          className="bg-[#F1F3F8] border-none rounded-lg px-3 py-2 text-xs font-bold outline-none w-full" 
+          value={item.dateReturned || ""} 
+          onChange={async (e) => {
+            const val = e.target.value;
+            // DITO RIN (Dapat may : LogEntry o : any)
+            const updatedItems = selectedBatch.items.map((i: LogEntry) => i.id === item.id ? { ...i, dateReturned: val || null, requestStatus: val ? "Returned" : "Not Yet Returned" } : i );
+            setSelectedBatch({ ...selectedBatch, items: updatedItems });
+            await updateSingleLogEntry(item.id, item.itemId, { dateReturned: val || null, requestStatus: val ? "Returned" : "Not Yet Returned" });
+            await fetchData();
+          }} 
+        />
+      </td>
+    </tr>
+  ))}
+</tbody>
               </table>
             </div>
           </div>
