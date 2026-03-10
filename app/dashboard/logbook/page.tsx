@@ -182,18 +182,18 @@ export default function LogbookPage() {
     };
 
 const result = await useEquipment(payload);
-    
+
     if (result.success) {
       setIsAddModalOpen(false);
       setSelectedItems([]);
       await fetchData();
     } else {
-      // FIX: Cast result to access error safely
-      const errorMsg = (result as { error?: string }).error;
-      alert(errorMsg || "Failed to save record");
+      const errorMessage = (result as { error?: string }).error || "Failed to save record";
+      alert(errorMessage);
     }
     
-    setIsSubmitting(false);
+    setIsSubmitting(false); // Move this inside the function
+  }; // <--- ADD THIS BRACE to properly close handleSaveRecord
 
   const handleBatchReturn = async () => {
     if (checkedItems.length === 0 || !manualReturnDate) return alert("Pumili ng items at petsa.");
