@@ -53,7 +53,7 @@ export default function LogbookPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Inline Editing State
-  const [editingCell, setEditingCell] = useState<{ id: number; field: string } | null>(null);
+  const [editingCell, setEditingCell] = useState<{ id: number | string, field: string } | null>(null);
 
   // Filters
   const [pickerSearch, setPickerSearch] = useState("");
