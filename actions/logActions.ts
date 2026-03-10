@@ -137,10 +137,10 @@ export async function getAllLogs() {
  * 5. Update Session Details
  */
 export async function updateSessionBatch(sessionId: number, updates: {
-  requestorName: string;
-  companyName: string;
-  departmentName: string;
-  purposeTitle: string;
+  requestorName?: string;
+  companyName?: string;
+  departmentName?: string;
+  purposeTitle?: string;
 }) {
   try {
     await db.update(borrowingSessions)
@@ -232,4 +232,5 @@ export async function updateLogBatch(logIds: number[], updates: any) {
     console.error("Log Batch Update Error:", error);
     return { success: false };
   }
+
 }
