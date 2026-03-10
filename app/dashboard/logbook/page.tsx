@@ -18,11 +18,10 @@ import {
 import { Html5QrcodeScanner } from "html5-qrcode";
 
 interface LogEntry {
-  id: number;           
-  itemId: number;       
-  dateReturned: string | null; 
-  requestStatus: string; 
-  // ... you can add other fields like requestorName if needed
+  id: number;
+  itemId: number;
+  dateReturned: string | null;
+  requestStatus: string;
 }
 
 export default function LogbookPage() {
@@ -204,19 +203,19 @@ const result = await useEquipment(payload);
   }; // <--- ADD THIS BRACE to properly close handleSaveRecord
 
 const handleBatchReturn = async () => {
-    // 1. Check basic validation
+    // 1. Validation
     if (checkedItems.length === 0 || !manualReturnDate) {
       return alert("Pumili ng items at petsa.");
     }
 
-    // 2. ANG GUARD: Siguraduhin na may laman ang selectedBatch bago i-access ang .items
+    // 2. Guard Clause
     if (!selectedBatch?.items) {
       return alert("Walang batch na napili o walang items sa batch na ito.");
     }
 
     setIsSubmitting(true);
     
-    // 3. Ngayong safe na, kunin ang IDs (may :any para sa build error)
+    // 3. Get IDs for database update
     const itemIdsToUpdate = selectedBatch.items
       .filter((i: any) => checkedItems.includes(i.id))
       .map((i: any) => i.itemId);
@@ -224,18 +223,23 @@ const handleBatchReturn = async () => {
     const result = await returnEquipmentBatch(checkedItems, itemIdsToUpdate, manualReturnDate);
     
     if (result.success) {
+      // OPTIONAL: I-update ang UI state para makita agad ang "Returned" status
+      const updatedItems = selectedBatch.items.map((i: LogEntry) => 
+        checkedItems.includes(i.id) 
+          ? { ...i, dateReturned: manualReturnDate, requestStatus: "Returned" } 
+          : i 
+      );
+      setSelectedBatch({ ...selectedBatch, items: updatedItems });
+
       await fetchData();
       setIsDetailModalOpen(false);
       setCheckedItems([]);
       setManualReturnDate("");
+    } else {
+      alert("Failed to return items.");
     }
     setIsSubmitting(false);
-  };
-
-  const handleLogout = async () => {
-    await supabase.auth.signOut();
-    router.push("/login");
-  };
+};
 
   // QR Scanner logic
   useEffect(() => {
@@ -1086,7 +1090,7 @@ const handleBatchReturn = async () => {
                 setIsProcessing(true);
                 try {
                   const today = new Date().toISOString().split('T')[0];
-                  const updatedItems = selectedBatch.items.map((i: LogEntry) => checkedItems.includes(i.id) ? { ...i, dateReturned: val || today, requestStatus: "Returned" } : i );
+                  const updatedItems = selectedBatch.items.map((i: LogEntry) => checkedItems.includes(i.id) ? { ...i, dateReturned: manualReturnDate || today, requestStatus: "Returned" } : i );
                   setSelectedBatch({ ...selectedBatch, items: updatedItems, status: "Returned" });
                   const logIds = updatedItems.map((i: any) => i.id);
                   for (const item of updatedItems) {
