@@ -232,5 +232,4 @@ export async function updateLogBatch(logIds: number[], updates: any) {
     console.error("Log Batch Update Error:", error);
     return { success: false };
   }
-
 }
