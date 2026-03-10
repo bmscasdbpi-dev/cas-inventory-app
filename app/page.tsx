@@ -1,11 +1,13 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { getItemByCode } from "../actions/itemActions"; 
 import { Html5QrcodeScanner, Html5Qrcode } from "html5-qrcode";
 
-export default function VerificationPage() {
+// --- 1. SUB-COMPONENT FOR LOGIC ---
+// We move the logic here because useSearchParams() triggers a client-side bailout
+function VerificationContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const itemCodeFromUrl = searchParams.get("c");
@@ -28,7 +30,6 @@ export default function VerificationPage() {
   // --- LOGIC: EXTRACT CODE FROM QR (RAW OR LINK) ---
   const processScannedText = (text: string) => {
     let finalCode = text.trim();
-    // Kung ang QR ay may URL (hal. https://inventory.com/?c=CA-001)
     if (text.includes("?c=")) {
       try {
         const urlParts = text.split("?c=");
@@ -64,7 +65,6 @@ export default function VerificationPage() {
     if (!file) return;
 
     setIsParsingImage(true);
-    // Gagawa ng temporary hidden reader para sa file scanning
     const html5QrCode = new Html5Qrcode("hidden-reader");
 
     try {
@@ -73,7 +73,7 @@ export default function VerificationPage() {
       setSearchCode(code);
       handleSearch(code);
     } catch (err) {
-      setIsInvalidModalOpen(true); // Invalid QR image
+      setIsInvalidModalOpen(true);
     } finally {
       setIsParsingImage(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
@@ -118,7 +118,6 @@ export default function VerificationPage() {
               <p className="text-[#44474E] text-sm mb-10 leading-relaxed">Enter a code, use your camera, or upload an image to verify equipment details.</p>
 
               <div className="space-y-4">
-                {/* Input Field */}
                 <input 
                   value={searchCode}
                   onChange={(e) => setSearchCode(e.target.value)}
@@ -127,7 +126,6 @@ export default function VerificationPage() {
                   className="w-full bg-transparent border-2 border-[#74777F] p-4 rounded-2xl outline-none text-base font-medium focus:border-[#005FB7] focus:border-2 transition-all text-center tracking-normal"
                 />
                 
-                {/* Main Verify Button */}
                 <button 
                   onClick={() => handleSearch()}
                   disabled={loading || !searchCode || isParsingImage}
@@ -145,7 +143,6 @@ export default function VerificationPage() {
                 </div>
 
                 <div className="grid grid-cols-2 gap-3">
-                  {/* Camera Button */}
                   <button 
                     onClick={() => setShowScanner(true)}
                     className="bg-[#D3E3FD] text-[#001C38] py-4 rounded-2xl font-semibold text-sm flex items-center justify-center gap-2 hover:bg-[#C1D8FB] transition-colors cursor-pointer"
@@ -154,12 +151,11 @@ export default function VerificationPage() {
                     Camera
                   </button>
 
-                  {/* Image Upload Button */}
                   <button 
                     onClick={() => fileInputRef.current?.click()}
                     className="bg-[#D3E3FD] text-[#001C38] py-4 rounded-2xl font-semibold text-sm flex items-center justify-center gap-2 hover:bg-[#C1D8FB] transition-colors cursor-pointer"
                   >
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x1="12" y1="3" y2="15"/></svg>
                     Upload
                   </button>
                   <input type="file" ref={fileInputRef} onChange={handleImageUpload} accept="image/*" className="hidden" />
@@ -193,10 +189,9 @@ export default function VerificationPage() {
           </div>
         )}
 
-{/* --- VIEW 3: VERIFIED DETAILS SCREEN (M3 REDESIGN) --- */}
+        {/* --- VIEW 3: VERIFIED DETAILS SCREEN --- */}
         {selectedItem && (
           <div className="animate-in fade-in slide-in-from-bottom-4 duration-700">
-            {/* Header Navigation & Badge */}
             <div className="flex flex-col md:flex-row md:items-center justify-between mb-8 gap-4">
               <button 
                 onClick={() => { setSelectedItem(null); router.push('?', {scroll:false}); }}
@@ -214,11 +209,9 @@ export default function VerificationPage() {
               </div>
             </div>
 
-            {/* Main Content Card */}
             <div className="bg-white rounded-[40px] shadow-sm border border-[#E0E2EC] overflow-hidden">
               <div className="grid grid-cols-1 lg:grid-cols-12">
                 
-                {/* Details Side (7 Cols) */}
                 <div className="lg:col-span-7 p-8 md:p-12 space-y-10">
                   <header>
                     <p className="text-xs font-bold text-[#005FB7] mb-3 uppercase tracking-wider">Device identification</p>
@@ -228,7 +221,6 @@ export default function VerificationPage() {
                     </div>
                   </header>
 
-                  {/* Tonal Data Grid (4 core fields) */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     {[
                       { label: "Operating status", value: selectedItem.deviceStatus || "Working", color: "text-green-700 font-bold italic" },
@@ -243,7 +235,6 @@ export default function VerificationPage() {
                     ))}
                   </div>
 
-                  {/* Long Text Records (Maintenance & Remarks) */}
                   <div className="space-y-6 pt-4">
                     <div className="space-y-3">
                       <div className="flex items-center gap-2 ml-2">
@@ -267,7 +258,6 @@ export default function VerificationPage() {
                   </div>
                 </div>
 
-                {/* PDF/Document Preview Side (5 Cols) */}
                 <div className="lg:col-span-5 bg-[#F7F9FF] p-8 md:p-12 flex flex-col items-center border-l border-[#E0E2EC]/50">
                   <p className="text-sm font-semibold text-[#74777F] mb-8">Digital documentation</p>
                   
@@ -296,7 +286,6 @@ export default function VerificationPage() {
                     );
                   })()}
                   
-                  {/* Quick Action Button for Mobile PDF */}
                   {selectedItem?.gdriveLink && (
                     <a 
                       href={selectedItem.gdriveLink} 
@@ -314,7 +303,7 @@ export default function VerificationPage() {
         )}
       </div>
 
-      {/* INVALID MODAL (M3 STYLE) */}
+      {/* INVALID MODAL */}
       {isInvalidModalOpen && (
         <div className="fixed inset-0 bg-[#001C38]/40 backdrop-blur-md flex items-center justify-center p-4 z-[200]">
           <div className="bg-[#FDFBFF] rounded-[32px] p-8 w-full max-w-sm text-center shadow-2xl border border-[#D3E3FD] animate-in zoom-in-95">
@@ -333,5 +322,18 @@ export default function VerificationPage() {
         </div>
       )}
     </div>
+  );
+}
+
+// --- 2. FINAL WRAPPED EXPORT ---
+export default function VerificationPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-[#F0F4F9] flex items-center justify-center">
+        <div className="w-12 h-12 border-4 border-[#D3E3FD] border-t-[#005FB7] rounded-full animate-spin"></div>
+      </div>
+    }>
+      <VerificationContent />
+    </Suspense>
   );
 }
