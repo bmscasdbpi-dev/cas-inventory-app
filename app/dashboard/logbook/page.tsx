@@ -1397,7 +1397,7 @@ const handleBatchReturn = async () => {
                       const newStatus = e.target.value;
                       const today = new Date().toISOString().split('T')[0];
                       const dateVal = newStatus === "Returned" ? today : null;
-                      const updatedItems = selectedBatch.items.map((i: LogEntry) => i.id === item.id ? { ...i, dateReturned: val || null, requestStatus: val ? "Returned" : "Not Yet Returned" } : i );
+                      const updatedItems = selectedBatch.items.map((i: LogEntry) => i.id === item.id ? { ...i, dateReturned: dateVal, requestStatus: newStatus } : i );
                       setSelectedBatch({ ...selectedBatch, items: updatedItems });
                       await updateSingleLogEntry(item.id, item.itemId, { requestStatus: newStatus, dateReturned: dateVal });
                       await fetchData();
