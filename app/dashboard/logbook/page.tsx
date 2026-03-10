@@ -1121,8 +1121,7 @@ const result = await useEquipment(payload);
                 if (e.key === 'Enter') {
                   const scannedCode = e.currentTarget.value.trim();
                   if (!scannedCode) return;
-
-                  const matchedItem = selectedBatch.items.find((i) => i.itemCode === scannedCode);
+const matchedItem = selectedBatch.items.find((i: any) => i.itemCode === scannedCode);
                   
                   if (matchedItem) {
                     // 1. Play Success Sound (Web Audio API)
