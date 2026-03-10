@@ -1421,7 +1421,7 @@ const handleBatchReturn = async () => {
               <table className="w-full text-left border-collapse table-fixed">
                 <thead className="bg-[#F1F3F8] border-b border-[#E0E2EC]"><tr className="text-[10px] font-black text-[#44474E] uppercase tracking-widest"><th className="px-6 py-4 w-[25%]">Item Details</th><th className="px-6 py-4 w-[20%]">Serial Number</th><th className="px-6 py-4 w-[25%]">Item Status</th><th className="px-6 py-4 w-[30%]">Date Returned</th></tr></thead>
                 <tbody className="divide-y divide-[#E0E2EC]">
-                  {selectedBatch.items.map((item) => (
+                  {selectedBatch.items.map((item: LogEntry) => (
                     <tr key={item.id} className="hover:bg-[#F8FAFF] transition-colors">
                       <td className="px-6 py-4"><div><p className="font-bold text-black uppercase text-xs leading-tight">{item.itemName}</p><p className="text-[11px] font-bold text-blue-600 mt-0.5">{item.itemCode}</p></div></td>
                       <td className="px-6 py-4"><span className="font-semibold text-[#74777F]">{item.serialNumber || '---'}</span></td>
