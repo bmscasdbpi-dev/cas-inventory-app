@@ -1374,7 +1374,7 @@ const handleBatchReturn = async () => {
 
             {/* MOBILE: CARD GRID */}
             <div className="grid grid-cols-1 gap-3 md:hidden mb-6">
-              {selectedBatch.items.map((item) => (
+              {selectedBatch.items.map((item: any) => (
                 <div key={item.id} className="bg-white p-4 rounded-2xl border border-[#E0E2EC] shadow-sm flex flex-col gap-3">
                   <div className="flex justify-between items-start border-b border-gray-50 pb-2">
                     <div className="max-w-[60%]"><p className="font-bold text-black text-xs uppercase truncate">{item.itemName}</p><p className="text-[10px] font-bold text-blue-600">{item.itemCode}</p></div>
