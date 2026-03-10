@@ -195,11 +195,20 @@ const result = await useEquipment(payload);
     setIsSubmitting(false); // Move this inside the function
   }; // <--- ADD THIS BRACE to properly close handleSaveRecord
 
-  const handleBatchReturn = async () => {
-    if (checkedItems.length === 0 || !manualReturnDate) return alert("Pumili ng items at petsa.");
+const handleBatchReturn = async () => {
+    // 1. Check basic validation
+    if (checkedItems.length === 0 || !manualReturnDate) {
+      return alert("Pumili ng items at petsa.");
+    }
+
+    // 2. ANG GUARD: Siguraduhin na may laman ang selectedBatch bago i-access ang .items
+    if (!selectedBatch?.items) {
+      return alert("Walang batch na napili o walang items sa batch na ito.");
+    }
+
     setIsSubmitting(true);
     
-    // Kunin ang mga Item IDs mula sa logs
+    // 3. Ngayong safe na, kunin ang IDs (may :any para sa build error)
     const itemIdsToUpdate = selectedBatch.items
       .filter((i: any) => checkedItems.includes(i.id))
       .map((i: any) => i.itemId);
@@ -226,7 +235,7 @@ const result = await useEquipment(payload);
     if (isQRScannerOpen) {
       scanner = new Html5QrcodeScanner("reader", { fps: 15, qrbox: 250 }, false);
       scanner.render((text) => {
-        const found = allItems.find(i => text.includes(i.itemCode) && i.itemCode !== "");
+        const found = allItems.find((i: any) => text.includes(i.itemCode) && i.itemCode !== "");
         if (found && !selectedItems.find(s => s.id === found.id) && found.availabilityStatus === "Available") {
           handleToggleItem(found);
         }
@@ -471,6 +480,7 @@ const result = await useEquipment(payload);
     </div>
   </div>
 </main>
+
 {/* MODAL: ADD RECORD */}
 {isAddModalOpen && (
   <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
@@ -1121,7 +1131,8 @@ const result = await useEquipment(payload);
                 if (e.key === 'Enter') {
                   const scannedCode = e.currentTarget.value.trim();
                   if (!scannedCode) return;
-const matchedItem = selectedBatch.items.find((i: any) => i.itemCode === scannedCode);
+
+                  const matchedItem = selectedBatch.items.find((i: any) => i.itemCode === scannedCode);
                   
                   if (matchedItem) {
                     // 1. Play Success Sound (Web Audio API)
@@ -1139,9 +1150,9 @@ const matchedItem = selectedBatch.items.find((i: any) => i.itemCode === scannedC
                     const today = new Date().toISOString().split('T')[0];
                     
                     // 2. Update UI
-                    const updatedItems = selectedBatch.items.map((i) => 
-                      i.itemCode === scannedCode ? { ...i, requestStatus: "Returned", dateReturned: today } : i
-                    );
+                    const updatedItems = selectedBatch.items.map((i: any) => 
+					  i.itemCode === scannedCode ? { ...i, requestStatus: "Returned", dateReturned: today } : i
+					);
                     setSelectedBatch({ ...selectedBatch, items: updatedItems });
                     
                     // 3. Reset Input for Continuous Scanning
