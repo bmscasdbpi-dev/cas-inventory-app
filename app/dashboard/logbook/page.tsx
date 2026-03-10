@@ -1086,7 +1086,7 @@ const handleBatchReturn = async () => {
                 setIsProcessing(true);
                 try {
                   const today = new Date().toISOString().split('T')[0];
-                  const updatedItems = selectedBatch.items.map((i: LogEntry) => i.id === item.id ? { ...i, dateReturned: val || null, requestStatus: val ? "Returned" : "Not Yet Returned" } : i );
+                  const updatedItems = selectedBatch.items.map((i: LogEntry) => checkedItems.includes(i.id) ? { ...i, dateReturned: val || today, requestStatus: "Returned" } : i );
                   setSelectedBatch({ ...selectedBatch, items: updatedItems, status: "Returned" });
                   const logIds = updatedItems.map((i: any) => i.id);
                   for (const item of updatedItems) {
