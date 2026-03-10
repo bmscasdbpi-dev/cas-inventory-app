@@ -1,229 +1,93 @@
 "use client";
+import { useState } from "react";
+import { createClient } from "../../db/supabase";
+import { useRouter } from "next/navigation";
 
-import { useState, useEffect, useRef, Suspense } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
-import { getItemByCode } from "../actions/itemActions"; 
-import { Html5QrcodeScanner, Html5Qrcode } from "html5-qrcode";
-
-// --- 1. SUB-COMPONENT PARA SA LOGIC ---
-function VerificationContent() {
-  const router = useRouter();
-  const searchParams = useSearchParams();
-  const itemCodeFromUrl = searchParams.get("c");
-
-  // --- STATES ---
-  const [searchCode, setSearchCode] = useState("");
-  const [selectedItem, setSelectedItem] = useState<any>(null);
-  const [isInvalidModalOpen, setIsInvalidModalOpen] = useState(false);
+export default function LoginPage() {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
-  const [showScanner, setShowScanner] = useState(false);
-  const [isParsingImage, setIsParsingImage] = useState(false);
-  
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const supabase = createClient();
+  const router = useRouter();
 
-  // --- INITIAL CHECK ---
-  useEffect(() => {
-    if (itemCodeFromUrl) handleSearch(itemCodeFromUrl);
-  }, [itemCodeFromUrl]);
-
-  // --- LOGIC: EXTRACT CODE FROM QR ---
-  const processScannedText = (text: string) => {
-    let finalCode = text.trim();
-    if (text.includes("?c=")) {
-      try {
-        const urlParts = text.split("?c=");
-        if (urlParts[1]) {
-          finalCode = urlParts[1].split("&")[0];
-        }
-      } catch (e) {
-        console.error("Error parsing QR link:", e);
-      }
-    }
-    return finalCode;
-  };
-
-  // --- LOGIC: CAMERA SCANNER ---
-  useEffect(() => {
-    let scanner: Html5QrcodeScanner;
-    if (showScanner) {
-      scanner = new Html5QrcodeScanner("reader", { fps: 15, qrbox: 280 }, false);
-      scanner.render((text) => {
-        const code = processScannedText(text);
-        setSearchCode(code);
-        handleSearch(code);
-        setShowScanner(false);
-        scanner.clear();
-      }, () => {});
-    }
-    return () => { if (scanner) scanner.clear().catch(() => {}); };
-  }, [showScanner]);
-
-  // --- LOGIC: IMAGE UPLOAD SCAN ---
-  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    setIsParsingImage(true);
-    const html5QrCode = new Html5Qrcode("hidden-reader");
-
-    try {
-      const text = await html5QrCode.scanFile(file, true);
-      const code = processScannedText(text);
-      setSearchCode(code);
-      handleSearch(code);
-    } catch (err) {
-      setIsInvalidModalOpen(true);
-    } finally {
-      setIsParsingImage(false);
-      if (fileInputRef.current) fileInputRef.current.value = "";
-    }
-  };
-
-  // --- LOGIC: DATABASE SEARCH ---
-  async function handleSearch(codeToSearch?: string) {
-    const code = codeToSearch || searchCode;
-    if (!code) return;
+  async function handleLogin(e: React.FormEvent) {
+    e.preventDefault();
     setLoading(true);
     
-    const cleanCode = code.trim().toUpperCase();
-    const item = await getItemByCode(cleanCode);
-    
-    if (item) {
-      setSelectedItem(item);
-      router.push(`?c=${cleanCode}`, { scroll: false });
+    const { error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
+
+    if (error) {
+      alert("Mali ang email o password!");
     } else {
-      setIsInvalidModalOpen(true);
+      router.push("/dashboard"); // Pag tama, pasok sa dashboard
     }
     setLoading(false);
   }
 
   return (
-    <div className="min-h-screen bg-[#F0F4F9] text-[#1A1C1E] p-4 md:p-8 tracking-normal">
-      <div className="max-w-6xl mx-auto">
-        <div id="hidden-reader" className="hidden"></div>
+<div className="min-h-screen flex items-center justify-center bg-slate-50 text-slate-800 p-6 selection:bg-indigo-100 selection:text-indigo-700">
+  {/* Background Decorative Elements - Softened for Light Mode */}
+  <div className="absolute top-0 -left-4 w-72 h-72 bg-indigo-200 rounded-full mix-blend-multiply filter blur-3xl opacity-30 animate-blob"></div>
+  <div className="absolute bottom-0 -right-4 w-72 h-72 bg-blue-200 rounded-full mix-blend-multiply filter blur-3xl opacity-30 animate-blob animation-delay-2000"></div>
 
-        {!selectedItem && !showScanner && (
-          <div className="flex flex-col items-center justify-center min-h-[80vh] animate-in fade-in zoom-in-95 duration-500">
-            <div className="w-full max-w-sm text-center">
-              <div className="inline-flex p-6 bg-[#D3E3FD] text-[#001C38] rounded-[28px] mb-8 shadow-sm">
-                <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
-              </div>
-              <h1 className="text-3xl font-medium mb-3">Item verification</h1>
-              <p className="text-[#44474E] text-sm mb-10 leading-relaxed">Enter a code, use your camera, or upload an image to verify equipment details.</p>
-              <div className="space-y-4">
-                <input 
-                  value={searchCode}
-                  onChange={(e) => setSearchCode(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-                  placeholder="Enter item code" 
-                  className="w-full bg-transparent border-2 border-[#74777F] p-4 rounded-2xl outline-none text-base font-medium focus:border-[#005FB7] transition-all text-center tracking-normal"
-                />
-                <button 
-                  onClick={() => handleSearch()}
-                  disabled={loading || !searchCode || isParsingImage}
-                  className="w-full bg-[#005FB7] text-white py-4 rounded-full font-semibold text-sm hover:shadow-md transition-all disabled:opacity-50 cursor-pointer flex items-center justify-center gap-3"
-                >
-                  {loading || isParsingImage ? <div className="w-5 h-5 border-3 border-white/30 border-t-white rounded-full animate-spin"></div> : "Verify code"}
-                </button>
-                <div className="relative py-6 flex items-center">
-                  <div className="flex-grow border-t border-[#C4C7C5]"></div>
-                  <span className="flex-shrink mx-4 text-xs font-medium text-[#44474E]">or</span>
-                  <div className="flex-grow border-t border-[#C4C7C5]"></div>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <button onClick={() => setShowScanner(true)} className="bg-[#D3E3FD] text-[#001C38] py-4 rounded-2xl font-semibold text-sm flex items-center justify-center gap-2 hover:bg-[#C1D8FB] transition-colors cursor-pointer">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
-                    Camera
-                  </button>
-                  <button onClick={() => fileInputRef.current?.click()} className="bg-[#D3E3FD] text-[#001C38] py-4 rounded-2xl font-semibold text-sm flex items-center justify-center gap-2 hover:bg-[#C1D8FB] transition-colors cursor-pointer">
-                    {/* FIXED SVG LINE BELOW: removed duplicate x1="12" */}
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-                    Upload
-                  </button>
-                  <input type="file" ref={fileInputRef} onChange={handleImageUpload} accept="image/*" className="hidden" />
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {showScanner && (
-          <div className="fixed inset-0 bg-[#FDFBFF] z-[100] flex flex-col animate-in slide-in-from-bottom-full duration-500">
-            <div className="p-6 flex items-center gap-4 border-b border-[#E0E2EC] bg-white">
-              <button onClick={() => setShowScanner(false)} className="p-2 hover:bg-[#F1F3F8] rounded-full transition-colors cursor-pointer">
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#44474E" strokeWidth="2.5"><path d="M19 12H5m7 7l-7-7 7-7"/></svg>
-              </button>
-              <h2 className="text-xl font-medium tracking-normal">Scan QR code</h2>
-            </div>
-            <div className="flex-1 flex flex-col items-center justify-center p-6 gap-8 bg-[#F0F4F9]">
-              <div className="w-full max-w-sm bg-white p-4 rounded-[32px] shadow-2xl border border-[#D3E3FD] overflow-hidden">
-                <div id="reader" className="rounded-2xl overflow-hidden bg-black aspect-square"></div>
-              </div>
-              <p className="text-[#44474E] text-sm text-center font-medium px-10">Point the camera at the item's QR code to verify automatically.</p>
-              <button onClick={() => setShowScanner(false)} className="px-10 py-4 bg-[#1A1C1E] text-white rounded-full font-bold text-xs cursor-pointer active:scale-95 transition-all">✕</button>
-            </div>
-          </div>
-        )}
-
-        {selectedItem && (
-          <div className="animate-in fade-in slide-in-from-bottom-4 duration-700">
-            <div className="flex flex-col md:flex-row md:items-center justify-between mb-8 gap-4">
-              <button 
-                onClick={() => { setSelectedItem(null); router.push('?', {scroll:false}); }}
-                className="inline-flex items-center gap-3 text-[#005FB7] font-semibold hover:bg-[#D3E3FD]/30 p-2 pr-6 rounded-full transition-all cursor-pointer group"
-              >
-                <div className="p-3 bg-white rounded-full border border-[#E0E2EC] shadow-sm">
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M19 12H5m7 7l-7-7 7-7"/></svg>
-                </div>
-                <span>Go Back</span>
-              </button>
-              <div className="px-6 py-2.5 bg-[#C4EED0] text-[#002107] rounded-full text-sm font-semibold flex items-center gap-3 border border-[#002107]/5 self-start shadow-sm">
-                <div className="w-2 h-2 bg-[#002107] rounded-full animate-pulse"></div> Official verified record
-              </div>
-            </div>
-
-            <div className="bg-white rounded-[40px] shadow-sm border border-[#E0E2EC] overflow-hidden">
-              <div className="grid grid-cols-1 lg:grid-cols-12">
-                <div className="lg:col-span-7 p-8 md:p-12 space-y-10">
-                  <header>
-                    <p className="text-xs font-bold text-[#005FB7] mb-3 uppercase tracking-wider">Device identification</p>
-                    <h1 className="text-4xl font-medium text-[#1A1C1E] mb-3 tracking-normal">{selectedItem.itemName}</h1>
-                    <div className="inline-block px-4 py-2 bg-[#F1F3F8] rounded-xl font-bold text-[#44474E] text-xs">{selectedItem.itemCode}</div>
-                  </header>
-                  {/* ... other details ... */}
-                  <div className="bg-[#F7F9FF] p-6 rounded-[28px] border border-[#D3E3FD]/30">
-                    <p className="text-xs font-semibold text-[#74777F] mb-2">Operating status</p>
-                    <p className="text-base font-medium text-green-700 font-bold italic">{selectedItem.deviceStatus || "Working"}</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {isInvalidModalOpen && (
-        <div className="fixed inset-0 bg-[#001C38]/40 backdrop-blur-md flex items-center justify-center p-4 z-[200]">
-          <div className="bg-[#FDFBFF] rounded-[32px] p-8 w-full max-w-sm text-center shadow-2xl border border-[#D3E3FD]">
-            <h2 className="text-xl font-medium mb-3">Invalid record</h2>
-            <p className="text-[#44474E] text-sm mb-10 leading-relaxed">The code was not found or the image could not be read.</p>
-            <button onClick={() => setIsInvalidModalOpen(false)} className="w-full bg-[#005FB7] text-white py-4 rounded-full font-semibold text-sm cursor-pointer">Close and retry</button>
-          </div>
-        </div>
-      )}
+  <form 
+    onSubmit={handleLogin} 
+    className="relative bg-white/70 backdrop-blur-xl border border-white p-10 rounded-3xl shadow-[0_20px_50px_rgba(0,0,0,0.05)] w-full max-w-md transition-all duration-300 hover:shadow-[0_20px_60px_rgba(0,0,0,0.08)] hover:border-slate-100"
+  >
+    <div className="mb-10 text-center">
+      <h1 className="text-3xl font-extrabold tracking-tight text-slate-900 mb-2">
+        
+      </h1>
+      <p className="text-slate-500 text-sm">Login to Dashboard</p>
     </div>
-  );
-}
 
-// --- 2. MAIN PAGE EXPORT WITH SUSPENSE ---
-export default function Page() {
-  return (
-    <Suspense fallback={
-      <div className="min-h-screen flex items-center justify-center bg-[#F0F4F9]">
-        <div className="w-12 h-12 border-4 border-[#005FB7]/30 border-t-[#005FB7] rounded-full animate-spin"></div>
+    <div className="space-y-5">
+      <div className="group">
+        <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1 ml-1 group-focus-within:text-indigo-600 transition-colors">
+          Email Address
+        </label>
+        <input 
+          type="email" 
+          placeholder="admin@system.com" 
+          className="w-full bg-slate-50 border border-slate-200 p-4 rounded-2xl outline-none text-slate-900 transition-all focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 placeholder:text-slate-400"
+          onChange={(e) => setEmail(e.target.value)}
+          required 
+        />
       </div>
-    }>
-      <VerificationContent />
-    </Suspense>
+
+      <div className="group">
+        <div className="flex justify-between mb-1 ml-1">
+          <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider group-focus-within:text-indigo-600 transition-colors">
+            Password
+          </label>
+          <a href="#" className="text-xs font-medium text-indigo-600 hover:text-indigo-700 transition-colors">Forgot?</a>
+        </div>
+        <input 
+          type="password" 
+          placeholder="••••••••" 
+          className="w-full bg-slate-50 border border-slate-200 p-4 rounded-2xl outline-none text-slate-900 transition-all focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 placeholder:text-slate-400"
+          onChange={(e) => setPassword(e.target.value)}
+          required 
+        />
+      </div>
+
+      <button 
+        disabled={loading}
+        className="group relative w-full bg-indigo-600 overflow-hidden text-white py-4 rounded-2xl font-bold transition-all duration-300 hover:bg-indigo-700 hover:shadow-lg hover:shadow-indigo-200 disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.98]"
+      >
+        <span className="relative z-10">
+          {loading ? "Authenticating..." : "Sign In"}
+        </span>
+      </button>
+    </div>
+
+    <p className="mt-8 text-center text-slate-400 text-xs">
+      &copy; 2026 DBPI-CAS Inventory.
+    </p>
+  </form>
+</div>
   );
 }
