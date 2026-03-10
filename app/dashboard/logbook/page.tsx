@@ -1310,33 +1310,50 @@ const handleBatchReturn = async () => {
               </div>
 
               <div className="md:col-span-3 grid grid-cols-2 md:grid-cols-1 gap-4 md:gap-6">
-                <div><p className="text-[10px] md:text-[11px] font-black text-[#74777F] uppercase tracking-wider mb-1">Date Requested</p><p className="font-bold text-[#1A1C1E] text-sm">{selectedBatch.dateRequested}</p></div>
-                <div>
-                  <p className="text-[10px] md:text-[11px] font-black text-[#74777F] uppercase tracking-wider mb-1">Status</p>
-                  <select value={selectedBatch.status} onChange={async (e) => {
-                    const newStatus = e.target.value;
-                    const resetItems = selectedBatch.items.map((i: any) => ({ ...i, requestStatus: "Not Yet Returned", dateReturned: null }));
-                    if (newStatus === "In used/Not Yet Returned") {
-                       const resetItems = selectedBatch.items.map((i) => ({ ...i, requestStatus: "Not Yet Returned", dateReturned: null }));
-                       setSelectedBatch({ ...selectedBatch, status: newStatus, items: resetItems });
-                       for (const item of selectedBatch.items) {
-  await updateSingleLogEntry(item.id, item.itemId, { 
-    requestStatus: newStatus === "Returned" ? "Returned" : "Not Yet Returned",
-    dateReturned: newStatus === "Returned" ? new Date().toISOString() : null
-  });
-}
-                    } else { setSelectedBatch({ ...selectedBatch, status: newStatus }); }
-                    await updateBatchStatus(logIds, newStatus);
-                    await fetchData();
-                  }} className="w-full bg-gray-100 border-none rounded-lg px-2 py-1.5 md:px-4 md:py-2.5 font-bold text-black text-xs outline-none shadow-sm cursor-pointer">
-                    <option value="Preparing">Preparing</option>
-                    <option value="Ready for Pickup">Ready for Pickup</option>
-                    <option value="In used/Not Yet Returned">Not Yet Returned</option>
-                    <option value="Returned">Returned</option>
-                    <option value="Cancelled">Cancelled</option>
-                  </select>
-                </div>
-              </div>
+  <div>
+    <p className="text-[10px] md:text-[11px] font-black text-[#74777F] uppercase tracking-wider mb-1">Date Requested</p>
+    <p className="font-bold text-[#1A1C1E] text-sm">{selectedBatch.dateRequested}</p>
+  </div>
+  <div>
+    <p className="text-[10px] md:text-[11px] font-black text-[#74777F] uppercase tracking-wider mb-1">Status</p>
+    <select 
+      value={selectedBatch.status} 
+      onChange={async (e) => {
+        const newStatus = e.target.value;
+        const logIds = selectedBatch.items.map((i: any) => i.id); // Define natin dito
+
+        if (newStatus === "In used/Not Yet Returned") {
+          const resetItems = selectedBatch.items.map((i: any) => ({ 
+            ...i, 
+            requestStatus: "Not Yet Returned", 
+            dateReturned: null 
+          }));
+          
+          setSelectedBatch({ ...selectedBatch, status: newStatus, items: resetItems });
+
+          for (const item of selectedBatch.items) {
+            await updateSingleLogEntry(item.id, item.itemId, { 
+              requestStatus: "Not Yet Returned",
+              dateReturned: null
+            });
+          }
+        } else { 
+          setSelectedBatch({ ...selectedBatch, status: newStatus }); 
+        }
+
+        await updateBatchStatus(logIds, newStatus);
+        await fetchData();
+      }} 
+      className="w-full bg-gray-100 border-none rounded-lg px-2 py-1.5 md:px-4 md:py-2.5 font-bold text-black text-xs outline-none shadow-sm cursor-pointer"
+    >
+      <option value="Preparing">Preparing</option>
+      <option value="Ready for Pickup">Ready for Pickup</option>
+      <option value="In used/Not Yet Returned">Not Yet Returned</option>
+      <option value="Returned">Returned</option>
+      <option value="Cancelled">Cancelled</option>
+    </select>
+  </div>
+</div>
             </div>
           </div>
 
