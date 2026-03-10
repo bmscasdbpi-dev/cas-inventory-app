@@ -17,6 +17,14 @@ import {
 
 import { Html5QrcodeScanner } from "html5-qrcode";
 
+interface LogEntry {
+  id: number;           
+  itemId: number;       
+  dateReturned: string | null; 
+  requestStatus: string; 
+  // ... you can add other fields like requestorName if needed
+}
+
 export default function LogbookPage() {
   // --- STATES ---
   const [logs, setLogs] = useState<any[]>([]);
@@ -47,7 +55,7 @@ export default function LogbookPage() {
 
   // Data States
   const [selectedItems, setSelectedItems] = useState<any[]>([]);
-  const [selectedBatch, setSelectedBatch] = useState<any>(null);
+  const [selectedBatch, setSelectedBatch] = useState<{ items: LogEntry[] } | any>(null);
   const [checkedItems, setCheckedItems] = useState<number[]>([]); 
   const [manualReturnDate, setManualReturnDate] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -1078,7 +1086,7 @@ const handleBatchReturn = async () => {
                 setIsProcessing(true);
                 try {
                   const today = new Date().toISOString().split('T')[0];
-                  const updatedItems = selectedBatch.items.map((i: any) => ({ ...i, dateReturned: today, requestStatus: "Returned" }));
+                  const updatedItems = selectedBatch.items.map((i: LogEntry) => i.id === item.id ? { ...i, dateReturned: val || null, requestStatus: val ? "Returned" : "Not Yet Returned" } : i );
                   setSelectedBatch({ ...selectedBatch, items: updatedItems, status: "Returned" });
                   const logIds = updatedItems.map((i: any) => i.id);
                   for (const item of updatedItems) {
@@ -1385,7 +1393,7 @@ const handleBatchReturn = async () => {
                       const newStatus = e.target.value;
                       const today = new Date().toISOString().split('T')[0];
                       const dateVal = newStatus === "Returned" ? today : null;
-                      const updatedItems = selectedBatch.items.map((i: any) => ({ ...i, requestStatus: "Returned", dateReturned: new Date().toISOString() }));
+                      const updatedItems = selectedBatch.items.map((i: LogEntry) => i.id === item.id ? { ...i, dateReturned: val || null, requestStatus: val ? "Returned" : "Not Yet Returned" } : i );
                       setSelectedBatch({ ...selectedBatch, items: updatedItems });
                       await updateSingleLogEntry(item.id, item.itemId, { requestStatus: newStatus, dateReturned: dateVal });
                       await fetchData();
@@ -1394,7 +1402,7 @@ const handleBatchReturn = async () => {
                     </select>
                     <input type="date" className="w-full bg-[#F1F3F8] rounded-xl px-2 py-1.5 text-[10px] font-bold outline-none text-center" value={item.dateReturned || ""} onChange={async (e) => {
                       const val = e.target.value;
-                      const updatedItems = selectedBatch.items.map((i) => i.id === item.id ? { ...i, dateReturned: val || null, requestStatus: val ? "Returned" : "Not Yet Returned" } : i );
+                      const updatedItems = selectedBatch.items.map((i: any) => i.id === item.id ? { ...i, dateReturned: val || null, requestStatus: val ? "Returned" : "Not Yet Returned" } : i );
                       setSelectedBatch({ ...selectedBatch, items: updatedItems });
                       await updateSingleLogEntry(item.id, item.itemId, { dateReturned: val || null, requestStatus: val ? "Returned" : "Not Yet Returned" });
                       await fetchData();
