@@ -244,6 +244,11 @@ const handleBatchReturn = async () => {
     setIsSubmitting(false);
 };
 
+const handleLogout = async () => {
+  await supabase.auth.signOut();
+  router.push("/login");
+};
+
   // QR Scanner logic
   useEffect(() => {
     let scanner: Html5QrcodeScanner | null = null;
