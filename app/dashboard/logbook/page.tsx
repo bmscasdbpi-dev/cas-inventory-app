@@ -22,7 +22,6 @@ interface LogEntry {
   itemId: number;
   dateReturned: string | null;
   requestStatus: string;
-  // Idagdag itong mga sumusunod:
   itemName?: string;      
   itemCode?: string;      
   serialNumber?: string;  
@@ -1434,7 +1433,7 @@ const handleBatchReturn = async () => {
                           const newStatus = e.target.value;
                           const today = new Date().toISOString().split('T')[0];
                           const dateVal = newStatus === "Returned" ? today : null;
-                          const updatedItems = selectedBatch.items.map((i) => i.id === item.id ? { ...i, requestStatus: newStatus, dateReturned: dateVal } : i );
+                          const updatedItems = selectedBatch.items.map((i: LogEntry) => i.id === item.id ? { ...i, requestStatus: newStatus, dateReturned: dateVal } : i );
                           setSelectedBatch({ ...selectedBatch, items: updatedItems });
                           await updateSingleLogEntry(item.id, item.itemId, { requestStatus: newStatus, dateReturned: dateVal });
                           await fetchData();
