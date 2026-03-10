@@ -155,27 +155,32 @@ export default function UnifiedDashboard() {
   }, [showDeleteConfirm, showSaveConfirm, showLogoutConfirm, isQRModalOpen, isModalOpen, isViewModalOpen]);
 
   // --- INITIALIZATION ---
-  useEffect(() => {
-    const init = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        router.push("/login");
-        return;
-      }
-      
-      // Fetch items and logs in parallel
-      const [itemsRes, logsRes] = await Promise.all([
-        getAllItems(),
-        getAllLogs()
-      ]);
+useEffect(() => {
+  const init = async () => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      router.push("/login");
+      return;
+    }
+    
+    // Fetch items and logs in parallel
+    const [itemsRes, logsRes] = await Promise.all([
+      getAllItems(),
+      getAllLogs()
+    ]);
 
-      if (itemsRes.success) setItemsList(itemsRes.data || []);
-      if (logsRes) setLogs(logsRes); // Assuming getAllLogs returns the array directly based on logActions structure
-      
-      setLoading(false);
-    };
-    init();
-  }, [router, supabase]);
+    if (itemsRes.success) setItemsList(itemsRes.data || []);
+
+    // FIX START: Extract the data property from logsRes
+    if (logsRes.success) {
+      setLogs(logsRes.data || []); 
+    }
+    // FIX END
+    
+    setLoading(false);
+  };
+  init();
+}, [router, supabase]);
 
   // --- HANDLERS ---
   const handleLogout = async () => {
