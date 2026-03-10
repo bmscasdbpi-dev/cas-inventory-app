@@ -1256,7 +1256,12 @@ const handleBatchReturn = async () => {
                       if (val === selectedBatch.requestorName) return setEditingCell(null);
                       setSelectedBatch({ ...selectedBatch, requestorName: val });
                       setEditingCell(null);
-                      await updateSessionBatch(selectedBatch.sessionId, { requestorName: val });
+                     await updateSessionBatch(selectedBatch.sessionId, { 
+  requestorName: val,
+  companyName: selectedBatch.companyName,
+  departmentName: selectedBatch.departmentName,
+  purposeTitle: selectedBatch.purposeTitle 
+});
                       await fetchData();
                     }} />
                   ) : ( <p className="font-bold text-[#1A1C1E] text-base md:text-lg cursor-text">{selectedBatch.requestorName || '---'}</p> )}
