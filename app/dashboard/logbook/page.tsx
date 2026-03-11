@@ -53,15 +53,18 @@ export default function LogbookPage() {
   const [qrScannerMode, setQrScannerMode] = useState<"add" | "return">("add");
   const [isCameraActive, setIsCameraActive] = useState(false);
 
-  // New Logic Modal States
+  // Logic & Confirmation Modal States
+  const [scannedItem, setScannedItem] = useState<any>(null);
+  const [showAddConfirmation, setShowAddConfirmation] = useState(false);
+  const [showReturnConfirmation, setShowReturnConfirmation] = useState(false);
   const [showInUseModal, setShowInUseModal] = useState(false);
   const [showReturnErrorModal, setShowReturnErrorModal] = useState(false);
+  const [showAlreadyAddedModal, setShowAlreadyAddedModal] = useState(false);
+  const [showAlreadyReturnedModal, setShowAlreadyReturnedModal] = useState(false);
 
   // Data States
   const [selectedItems, setSelectedItems] = useState<any[]>([]);
-  const [selectedBatch, setSelectedBatch] = useState<
-    { items: LogEntry[] } | any
-  >(null);
+  const [selectedBatch, setSelectedBatch] = useState<{ items: LogEntry[] } | any>(null);
   const [checkedItems, setCheckedItems] = useState<number[]>([]);
   const [manualReturnDate, setManualReturnDate] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -102,15 +105,94 @@ export default function LogbookPage() {
     };
   }, [selectedItems, selectedBatch, checkedItems, qrScannerMode, allItems]);
 
-  const categories = [
-    "All",
-    "Cameras & Accessories",
-    "Lights & Accessories",
-    "Sound & Accessories",
-    "Computers & Peripherals",
-    "Office Appliance",
-    "Others",
-  ];
+  const categories = ["All", "Cameras & Accessories", "Lights & Accessories", "Sound & Accessories", "Computers & Peripherals", "Office Appliance", "Others"];
+
+  // --- HELPER FUNCTIONS ---
+
+  // Professional high-pitched scanner beep generation
+  const playScanSound = () => {
+    try {
+      const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const oscillator = audioCtx.createOscillator();
+      const gainNode = audioCtx.createGain();
+
+      oscillator.type = "sine"; 
+      oscillator.frequency.setValueAtTime(1200, audioCtx.currentTime); // High pitch frequency
+      
+      gainNode.gain.setValueAtTime(0.1, audioCtx.currentTime); 
+      gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
+
+      oscillator.connect(gainNode);
+      gainNode.connect(audioCtx.destination);
+
+      oscillator.start();
+      oscillator.stop(audioCtx.currentTime + 0.15); 
+    } catch (err) {
+      console.error("Audio beep failed:", err);
+    }
+  };
+
+  // Extracts pattern CA-000-00 from strings/URLs
+  const extractItemCode = (input: string) => {
+    const pattern = /[A-Z]{2}-\d{3}-\d{2}/;
+    const match = input.match(pattern);
+    return match ? match[0] : input;
+  };
+
+  // --- CORE LOGIC ---
+
+  const processQrResult = async (decodedText: string) => {
+    // 1. Play high-pitched electronic beep immediately
+    playScanSound();
+
+    const cleanCode = extractItemCode(decodedText);
+    const { qrScannerMode, allItems, selectedItems, selectedBatch } = stateRef.current;
+
+    // --- LOGIC 1: ADDING ITEMS (BORROW MODE) ---
+    if (qrScannerMode === "add") {
+      const found = allItems.find((i: any) => cleanCode === i.itemCode);
+      if (found) {
+        if (found.availabilityStatus !== "Available") {
+          setShowInUseModal(true);
+        } else if (selectedItems.find((s) => s.id === found.id)) {
+          setShowAlreadyAddedModal(true);
+        } else {
+          setScannedItem(found);
+          setShowAddConfirmation(true);
+        }
+      }
+    }
+
+    // --- LOGIC 2: RETURNING ITEMS (RETURN MODE) ---
+    else if (qrScannerMode === "return") {
+      const foundInBatch = selectedBatch?.items?.find((i: any) => i.itemCode === cleanCode);
+      if (foundInBatch) {
+        if (foundInBatch.requestStatus === "Returned") {
+          setShowAlreadyReturnedModal(true);
+        } else {
+          const today = new Date().toISOString().split("T")[0];
+          
+          // Update local state
+          const updatedItems = selectedBatch.items.map((i: any) =>
+            i.id === foundInBatch.id ? { ...i, requestStatus: "Returned", dateReturned: today } : i,
+          );
+          setSelectedBatch({ ...selectedBatch, items: updatedItems });
+          
+          // Update Database
+          await updateSingleLogEntry(foundInBatch.id, foundInBatch.itemId, {
+            requestStatus: "Returned",
+            dateReturned: today,
+          });
+          
+          setScannedItem(foundInBatch);
+          setShowReturnConfirmation(true);
+          await fetchData();
+        }
+      } else {
+        setShowReturnErrorModal(true);
+      }
+    }
+  };
 
   // --- SUGGESTION LOGIC ---
   const SUGGESTION_MAP: Record<string, string[]> = {
@@ -119,10 +201,7 @@ export default function LogbookPage() {
   };
 
   const suggestedItems = allItems.filter((item) => {
-    if (
-      item.availabilityStatus !== "Available" ||
-      selectedItems.some((s) => s.id === item.id)
-    ) {
+    if (item.availabilityStatus !== "Available" || selectedItems.some((s) => s.id === item.id)) {
       return false;
     }
     return selectedItems.some((selected) => {
@@ -143,9 +222,7 @@ export default function LogbookPage() {
           companyName: log.companyName,
           departmentName: log.departmentName,
           purposeTitle: log.purposeTitle,
-          dateRequested: log.dateRequested
-            ? log.dateRequested.split(/[ T]/)[0]
-            : "No Date",
+          dateRequested: log.dateRequested ? log.dateRequested.split(/[ T]/)[0] : "No Date",
           pickupDate: log.pickupDate,
           expectedReturnDate: log.expectedReturnDate,
           status: log.requestStatus,
@@ -172,8 +249,7 @@ export default function LogbookPage() {
       const matchesSearch =
         item.itemName?.toLowerCase().includes(pickerSearch.toLowerCase()) ||
         item.itemCode?.toLowerCase().includes(pickerSearch.toLowerCase());
-      const matchesCategory =
-        activeCategory === "All" || item.category === activeCategory;
+      const matchesCategory = activeCategory === "All" || item.category === activeCategory;
       return matchesSearch && matchesCategory;
     });
     return filtered.sort((a, b) => a.id - b.id);
@@ -181,19 +257,14 @@ export default function LogbookPage() {
 
   // --- INITIALIZATION ---
   const fetchData = async () => {
-    const [logsRes, itemsRes] = await Promise.all([
-      getAllLogs(),
-      getAllItems(),
-    ]);
+    const [logsRes, itemsRes] = await Promise.all([getAllLogs(), getAllItems()]);
     if (logsRes.success) setLogs(logsRes.data);
     if (itemsRes.success) setAllItems(itemsRes.data);
   };
 
   useEffect(() => {
     const checkAuth = async () => {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+      const { data: { user } } = await supabase.auth.getUser();
       if (!user) router.push("/login");
       else {
         await fetchData();
@@ -206,16 +277,12 @@ export default function LogbookPage() {
   // --- HANDLERS ---
   const handleToggleItem = (item: any) => {
     setSelectedItems((prev) =>
-      prev.find((i) => i.id === item.id)
-        ? prev.filter((i) => i.id !== item.id)
-        : [...prev, item],
+      prev.find((i) => i.id === item.id) ? prev.filter((i) => i.id !== item.id) : [...prev, item],
     );
   };
 
   const handleToggleCheck = (id: number) => {
-    setCheckedItems((prev) =>
-      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id],
-    );
+    setCheckedItems((prev) => (prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]));
   };
 
   const handleSaveRecord = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -225,9 +292,7 @@ export default function LogbookPage() {
     const claim = formData.get("claimDate") as string;
     const returnDt = formData.get("returnExpectedDate") as string;
     if (new Date(returnDt) < new Date(claim))
-      return alert(
-        "Ang return date ay hindi pwedeng mas maaga sa pickup date.",
-      );
+      return alert("Ang return date ay hindi pwedeng mas maaga sa pickup date.");
 
     setIsSubmitting(true);
     const payload = {
@@ -257,67 +322,6 @@ export default function LogbookPage() {
     router.push("/login");
   };
 
-  // --- QR SCANNER CORE LOGIC ---
-
-  // Extracts pattern CA-000-00 from strings/URLs
-  const extractItemCode = (input: string) => {
-    const pattern = /[A-Z]{2}-\d{3}-\d{2}/;
-    const match = input.match(pattern);
-    return match ? match[0] : input;
-  };
-
-  const processQrResult = async (decodedText: string) => {
-    const cleanCode = extractItemCode(decodedText);
-    const { qrScannerMode, allItems, selectedItems, selectedBatch } =
-      stateRef.current;
-
-    // --- LOGIC 1: ADDING ITEMS (BORROW MODE) ---
-    if (qrScannerMode === "add") {
-      const found = allItems.find((i: any) => cleanCode === i.itemCode);
-
-      if (found) {
-        if (found.availabilityStatus !== "Available") {
-          // Rule: If unavailable, show "Item is Inused" modal
-          setShowInUseModal(true);
-        } else if (!selectedItems.find((s) => s.id === found.id)) {
-          // Rule: If available and not yet in list, add it
-          handleToggleItem(found);
-        }
-      }
-    }
-
-    // --- LOGIC 2: RETURNING ITEMS (RETURN MODE) ---
-    else if (qrScannerMode === "return") {
-      const foundInBatch = selectedBatch?.items?.find(
-        (i: any) => i.itemCode === cleanCode && i.requestStatus !== "Returned",
-      );
-
-      if (foundInBatch) {
-        // Rule: Matched in list -> update state to returned automatically
-        const today = new Date().toISOString().split("T")[0];
-
-        // Update local UI state
-        const updatedItems = selectedBatch.items.map((i: any) =>
-          i.id === foundInBatch.id
-            ? { ...i, requestStatus: "Returned", dateReturned: today }
-            : i,
-        );
-        setSelectedBatch({ ...selectedBatch, items: updatedItems });
-
-        // Update Database automatically
-        await updateSingleLogEntry(foundInBatch.id, foundInBatch.itemId, {
-          requestStatus: "Returned",
-          dateReturned: today,
-        });
-
-        await fetchData(); // Refresh shared data
-      } else {
-        // Rule: Not matched -> show "Item is not found" modal
-        setShowReturnErrorModal(true);
-      }
-    }
-  };
-
   useEffect(() => {
     if (isQRScannerOpen) {
       const timeoutId = setTimeout(async () => {
@@ -325,7 +329,6 @@ export default function LogbookPage() {
           const { Html5Qrcode } = await import("html5-qrcode");
           const scanner = new Html5Qrcode("reader");
           scannerRef.current = scanner;
-
           await scanner.start(
             { facingMode: "environment" },
             { fps: 20, qrbox: { width: 250, height: 250 } },
@@ -885,7 +888,7 @@ export default function LogbookPage() {
                         setQrScannerMode("add");
                         setIsQRScannerOpen(true);
                       }}
-                      className="flex items-center gap-2 px-5 py-2.5 bg-[#F1F3F8] text-[#005FB7] text-xs font-bold rounded-xl cursor-pointer transition-all hover:bg-[#D6E3FF] disabled:opacity-50"
+                      className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 text-white text-xs font-bold rounded-xl cursor-pointer transition-all hover:bg-blue-900 disabled:opacity-50"
                     >
                       Scan QR
                     </button>
@@ -1174,39 +1177,22 @@ export default function LogbookPage() {
         </div>
       )}
 
-      {/* MODAL 1: FIXED ITEM PICKER (CLEAN & SORTED OLDEST FIRST) */}
+{/* MODAL 1: FIXED ITEM PICKER (CLEAN & SORTED OLDEST FIRST) */}
       {isItemPickerOpen && (
         <div className="fixed inset-0 z-[210] flex items-center justify-center bg-black/60 backdrop-blur-md p-4 text-sm">
-          {/* Main Container */}
           <div className="bg-white w-full max-w-5xl rounded-[40px] shadow-2xl flex flex-col lg:flex-row h-[85vh] overflow-hidden border border-white/20 relative">
             {/* LEFT SIDE: SEARCH & SELECTION LIST */}
             <div className="flex-1 flex flex-col p-8 border-r border-[#E0E2EC] min-w-0 bg-white">
               <div className="flex justify-between items-start mb-6">
                 <div>
-                  <h3 className="font-bold text-2xl text-[#1A1C1E] tracking-normal">
-                    Select equipment
-                  </h3>
-                  <p className="text-sm text-[#74777F] font-medium tracking-normal mt-1">
-                    Issuance selection
-                  </p>
+                  <h3 className="font-bold text-2xl text-[#1A1C1E] tracking-normal">Select equipment</h3>
+                  <p className="text-sm text-[#74777F] font-medium tracking-normal mt-1">Issuance selection</p>
                 </div>
-
-                {/* IMPROVED CLOSE BUTTON: Visible on all screens, positioned away from the sidebar */}
                 <button
                   onClick={() => setIsItemPickerOpen(false)}
                   className="p-3 bg-[#F1F3F8] text-[#74777F] rounded-full cursor-pointer hover:bg-[#E2E2E6] hover:text-[#BA1A1A] transition-all shadow-sm"
-                  title="Close modal"
                 >
-                  <svg
-                    width="20"
-                    height="20"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2.5"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                     <line x1="18" y1="6" x2="6" y2="18"></line>
                     <line x1="6" y1="6" x2="18" y2="18"></line>
                   </svg>
@@ -1215,15 +1201,7 @@ export default function LogbookPage() {
 
               {/* SEARCH */}
               <div className="relative mb-6">
-                <svg
-                  className="absolute left-4 top-1/2 -translate-y-1/2 text-[#74777F]"
-                  width="18"
-                  height="18"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2.5"
-                >
+                <svg className="absolute left-4 top-1/2 -translate-y-1/2 text-[#74777F]" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                   <circle cx="11" cy="11" r="8"></circle>
                   <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
                 </svg>
@@ -1250,12 +1228,10 @@ export default function LogbookPage() {
                 ))}
               </div>
 
-              {/* SCROLLABLE ITEM LIST */}
+              {/* ITEM LIST */}
               <div className="flex-1 overflow-y-auto space-y-3 custom-scrollbar pr-2">
                 {filteredPickerItems.map((item) => {
-                  const isSelected = selectedItems.find(
-                    (i) => i.id === item.id,
-                  );
+                  const isSelected = selectedItems.find((i) => i.id === item.id);
                   const isAvailable = item.availabilityStatus === "Available";
                   return (
                     <div
@@ -1267,40 +1243,19 @@ export default function LogbookPage() {
                     >
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <div className="space-y-1">
-                          <p className="font-bold text-base text-[#1A1C1E] leading-tight">
-                            {item.itemName}
-                          </p>
-                          <p className="text-xs font-semibold text-[#005FB7]">
-                            {item.itemCode}
-                          </p>
+                          <p className="font-bold text-base text-[#1A1C1E] leading-tight">{item.itemName}</p>
+                          <p className="text-xs font-semibold text-[#005FB7]">{item.itemCode}</p>
                         </div>
                         <div className="text-xs font-semibold text-[#44474E] flex flex-col justify-center gap-1">
-                          <p>
-                            <span className="text-[#74777F] font-bold text-[10px]">
-                              Serial:
-                            </span>{" "}
-                            {item.serialNumber || "N/A"}
-                          </p>
+                          <p><span className="text-[#74777F] font-bold text-[10px]">Serial:</span> {item.serialNumber || "N/A"}</p>
                           <div className="flex gap-2">
-                            <span
-                              className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${item.deviceStatus === "Working" ? "bg-green-100 text-green-700" : "bg-orange-100 text-orange-700"}`}
-                            >
-                              {item.deviceStatus}
-                            </span>
-                            <span
-                              className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${isAvailable ? "bg-blue-100 text-blue-700" : "bg-red-100 text-red-700"}`}
-                            >
-                              {item.availabilityStatus}
-                            </span>
+                            <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${item.deviceStatus === "Working" ? "bg-green-100 text-green-700" : "bg-orange-100 text-orange-700"}`}>{item.deviceStatus}</span>
+                            <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${isAvailable ? "bg-blue-100 text-blue-700" : "bg-red-100 text-red-700"}`}>{item.availabilityStatus}</span>
                           </div>
                         </div>
                       </div>
                       <div className="pl-4">
-                        {isSelected && (
-                          <div className="w-8 h-8 bg-[#005FB7] rounded-full flex items-center justify-center text-white shadow-lg">
-                            ✓
-                          </div>
-                        )}
+                        {isSelected && <div className="w-8 h-8 bg-[#005FB7] rounded-full flex items-center justify-center text-white shadow-lg">✓</div>}
                       </div>
                     </div>
                   );
@@ -1308,55 +1263,27 @@ export default function LogbookPage() {
               </div>
             </div>
 
-            {/* RIGHT SIDE: SIDEBAR (SELECTED LIST) */}
+            {/* RIGHT SIDEBAR: SELECTED LIST */}
             <div className="w-full lg:w-85 bg-[#F7F9FF] p-8 flex flex-col h-full border-t lg:border-t-0 border-[#E0E2EC]">
               <div className="flex justify-between items-center mb-8">
-                <h4 className="font-bold text-sm text-[#74777F] tracking-normal">
-                  Selected list
-                </h4>
-                <span className="bg-[#005FB7] text-white text-xs font-bold px-3 py-1 rounded-full">
-                  {selectedItems.length} items
-                </span>
+                <h4 className="font-bold text-sm text-[#74777F]">Selected list</h4>
+                <span className="bg-[#005FB7] text-white text-xs font-bold px-3 py-1 rounded-full">{selectedItems.length} items</span>
               </div>
 
               <div className="flex-1 overflow-y-auto space-y-3 custom-scrollbar pr-1">
                 {selectedItems.length === 0 ? (
                   <div className="h-full flex flex-col items-center justify-center text-center opacity-30">
-                    <p className="text-sm font-bold tracking-normal leading-tight">
-                      No items
-                      <br />
-                      selected yet
-                    </p>
+                    <p className="text-sm font-bold leading-tight">No items<br />selected yet</p>
                   </div>
                 ) : (
                   selectedItems.map((item) => (
-                    <div
-                      key={item.id}
-                      className="bg-white p-4 rounded-2xl shadow-sm border border-[#D6E3FF] flex justify-between items-center group animate-in slide-in-from-right-4"
-                    >
+                    <div key={item.id} className="bg-white p-4 rounded-2xl shadow-sm border border-[#D6E3FF] flex justify-between items-center animate-in slide-in-from-right-4">
                       <div className="min-w-0">
-                        <p className="font-bold text-sm truncate text-[#1A1C1E] tracking-normal">
-                          {item.itemName}
-                        </p>
-                        <p className="text-xs font-semibold text-[#005FB7] tracking-normal">
-                          {item.itemCode}
-                        </p>
+                        <p className="font-bold text-sm truncate text-[#1A1C1E]">{item.itemName}</p>
+                        <p className="text-xs font-semibold text-[#005FB7]">{item.itemCode}</p>
                       </div>
-                      <button
-                        onClick={() => handleToggleItem(item)}
-                        className="p-2 text-[#BA1A1A] hover:bg-red-50 rounded-lg transition-all cursor-pointer"
-                      >
-                        <svg
-                          width="14"
-                          height="14"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="3"
-                        >
-                          <line x1="18" y1="6" x2="6" y2="18"></line>
-                          <line x1="6" y1="6" x2="18" y2="18"></line>
-                        </svg>
+                      <button onClick={() => handleToggleItem(item)} className="p-2 text-[#BA1A1A] hover:bg-red-50 rounded-lg transition-all cursor-pointer">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
                       </button>
                     </div>
                   ))
@@ -1364,18 +1291,8 @@ export default function LogbookPage() {
               </div>
 
               <div className="pt-8 space-y-3">
-                <button
-                  onClick={() => setIsItemPickerOpen(false)}
-                  className="w-full py-5 bg-[#1A1C1E] text-white rounded-[24px] font-bold text-sm tracking-normal shadow-xl hover:bg-black transition-all cursor-pointer active:scale-95"
-                >
-                  Done selecting
-                </button>
-                <button
-                  onClick={() => setSelectedItems([])}
-                  className="w-full text-xs font-bold text-[#74777F] tracking-normal hover:text-[#BA1A1A] cursor-pointer"
-                >
-                  Clear selection
-                </button>
+                <button onClick={() => setIsItemPickerOpen(false)} className="w-full py-5 bg-[#1A1C1E] text-white rounded-[24px] font-bold text-sm shadow-xl hover:bg-black transition-all cursor-pointer active:scale-95">Done selecting</button>
+                <button onClick={() => setSelectedItems([])} className="w-full text-xs font-bold text-[#74777F] hover:text-[#BA1A1A] cursor-pointer">Clear selection</button>
               </div>
             </div>
           </div>
@@ -1386,183 +1303,66 @@ export default function LogbookPage() {
       {isQRScannerOpen && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 backdrop-blur-md p-4">
           <div className="bg-white w-full max-w-xl rounded-[40px] flex flex-col h-[90vh] overflow-hidden shadow-2xl border border-white/20">
-            {/* HEADER SECTION */}
             <div className="p-8 pb-4 bg-white flex justify-between items-start">
               <div>
-                <h3 className="font-bold text-2xl text-[#1A1C1E] tracking-tight">
-                  {qrScannerMode === "add"
-                    ? "Issuance Scanner"
-                    : "Return Scanner"}
-                </h3>
-                <p className="text-xs text-[#74777F] font-medium">
-                  {qrScannerMode === "add"
-                    ? "Scanning items for a new borrow request."
-                    : "Scanning items to mark as returned."}
-                </p>
+                <h3 className="font-bold text-2xl text-[#1A1C1E] tracking-tight">{qrScannerMode === "add" ? "Issuance Scanner" : "Return Scanner"}</h3>
+                <p className="text-xs text-[#74777F] font-medium">{qrScannerMode === "add" ? "Scanning items for a new borrow request." : "Scanning items to mark as returned."}</p>
               </div>
-              <button
-                onClick={() => setIsQRScannerOpen(false)}
-                className="p-3 bg-[#F1F3F8] rounded-full cursor-pointer hover:bg-[#E2E2E6] transition-colors"
-              >
-                <svg
-                  width="20"
-                  height="20"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="3"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <line x1="18" y1="6" x2="6" y2="18"></line>
-                  <line x1="6" y1="6" x2="18" y2="18"></line>
-                </svg>
+              <button onClick={() => setIsQRScannerOpen(false)} className="p-3 bg-[#F1F3F8] rounded-full cursor-pointer hover:bg-[#E2E2E6] transition-colors">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
               </button>
             </div>
 
             <div className="flex-1 overflow-y-auto custom-scrollbar p-8 pt-0 space-y-8">
-              {/* CAMERA VIEWPORT SECTION */}
               <div className="flex flex-col items-center">
                 <div className="relative w-full aspect-square max-w-[380px] overflow-hidden rounded-[40px] bg-black border-[12px] border-[#F1F3F8] shadow-2xl group">
                   <div id="reader" className="w-full h-full object-cover"></div>
-
                   <div className="absolute inset-0 border-[30px] border-black/30 pointer-events-none"></div>
                   <div className="absolute top-8 left-8 w-10 h-10 border-t-4 border-l-4 border-[#005FB7] rounded-tl-xl"></div>
                   <div className="absolute top-8 right-8 w-10 h-10 border-t-4 border-r-4 border-[#005FB7] rounded-tr-xl"></div>
                   <div className="absolute bottom-8 left-8 w-10 h-10 border-b-4 border-l-4 border-[#005FB7] rounded-bl-xl"></div>
                   <div className="absolute bottom-8 right-8 w-10 h-10 border-b-4 border-r-4 border-[#005FB7] rounded-br-xl"></div>
                   <div className="absolute top-0 left-0 w-full h-1.5 bg-[#005FB7] shadow-[0_0_20px_#005FB7] animate-scan z-10"></div>
-
                   <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-2 bg-black/60 backdrop-blur-md px-4 py-2 rounded-full border border-white/20">
                     <div className="w-2 h-2 bg-green-500 rounded-full animate-ping"></div>
-                    <span className="text-[10px] font-black text-white uppercase tracking-widest">
-                      {isCameraActive ? "Scanner Active" : "Camera Paused"}
-                    </span>
+                    <span className="text-[10px] font-black text-white uppercase tracking-widest">{isCameraActive ? "Scanner Active" : "Camera Paused"}</span>
                   </div>
                 </div>
 
-                {/* QUICK ACTIONS */}
                 <div className="flex gap-3 mt-6 w-full max-w-[380px]">
-                  <button
-                    onClick={toggleCamera}
-                    className={`flex-1 py-3 rounded-2xl text-[10px] font-black uppercase tracking-wider transition-all ${isCameraActive ? "bg-red-50 text-red-600 border border-red-100" : "bg-blue-600 text-white"}`}
-                  >
-                    {isCameraActive ? "Stop Camera" : "Start Camera"}
-                  </button>
-                  <button
-                    onClick={() => fileInputRef.current?.click()}
-                    className="flex-1 py-3 bg-[#F1F3F8] text-[#44474E] rounded-2xl text-[10px] font-black uppercase tracking-wider border border-[#E0E2EC]"
-                  >
-                    Upload Image
-                  </button>
-                  <input
-                    type="file"
-                    ref={fileInputRef}
-                    className="hidden"
-                    accept="image/*"
-                    onChange={handleFileChange}
-                  />
+                  <button onClick={toggleCamera} className={`flex-1 py-3 rounded-2xl text-[10px] font-black uppercase tracking-wider transition-all ${isCameraActive ? "bg-red-50 text-red-600 border border-red-100" : "bg-blue-600 text-white"} cursor-pointer`}>{isCameraActive ? "Stop Camera" : "Start Camera"}</button>
+                  <button onClick={() => fileInputRef.current?.click()} className="flex-1 py-3 bg-[#F1F3F8] text-[#44474E] rounded-2xl text-[10px] font-black uppercase tracking-wider border border-[#E0E2EC] cursor-pointer">Upload Image</button>
+                  <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleFileChange} />
                 </div>
               </div>
 
-              {/* SCANNED ITEMS LIST SECTION */}
               <div className="bg-[#F7F9FF] rounded-[32px] p-6 border border-[#E0E2EC]">
                 <div className="flex justify-between items-center mb-6">
-                  <h4 className="font-black text-xs text-[#74777F] uppercase tracking-[0.2em]">
-                    {qrScannerMode === "add"
-                      ? "Items to Borrow"
-                      : "Items Returned"}
-                  </h4>
+                  <h4 className="font-black text-xs text-[#74777F] uppercase tracking-[0.2em]">{qrScannerMode === "add" ? "Items to Borrow" : "Items Returned"}</h4>
                   <div className="bg-[#005FB7] text-white text-[10px] font-black px-3 py-1 rounded-full shadow-lg shadow-blue-100">
-                    {qrScannerMode === "add"
-                      ? selectedItems.length
-                      : selectedBatch?.items?.filter(
-                          (i: any) => i.requestStatus === "Returned",
-                        ).length || 0}{" "}
-                    Items
+                    {qrScannerMode === "add" ? selectedItems.length : selectedBatch?.items?.filter((i: any) => i.requestStatus === "Returned").length || 0} Items
                   </div>
                 </div>
 
                 <div className="space-y-3 max-h-[250px] overflow-y-auto custom-scrollbar pr-1">
-                  {/* LOGIC: Show selectedItems for 'add' mode, or already returned items for 'return' mode */}
                   {(() => {
-                    const displayList =
-                      qrScannerMode === "add"
-                        ? selectedItems
-                        : selectedBatch?.items?.filter(
-                            (i: any) => i.requestStatus === "Returned",
-                          ) || [];
-
-                    if (displayList.length === 0) {
-                      return (
-                        <div className="py-8 flex flex-col items-center justify-center text-center opacity-30">
-                          <svg
-                            width="32"
-                            height="32"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="#44474E"
-                            strokeWidth="1.5"
-                            className="mb-2"
-                          >
-                            <path d="M3 7V5a2 2 0 0 1 2-2h2"></path>
-                            <path d="M17 3h2a2 2 0 0 1 2 2v2"></path>
-                            <path d="M21 17v2a2 2 0 0 1-2 2h-2"></path>
-                            <path d="M7 21H5a2 2 0 0 1-2-2v-2"></path>
-                            <rect x="7" y="7" width="10" height="10"></rect>
-                          </svg>
-                          <p className="text-[10px] font-black uppercase tracking-widest">
-                            Awaiting scans...
-                          </p>
-                        </div>
-                      );
-                    }
-
+                    const displayList = qrScannerMode === "add" ? selectedItems : selectedBatch?.items?.filter((i: any) => i.requestStatus === "Returned") || [];
+                    if (displayList.length === 0) return (
+                      <div className="py-8 flex flex-col items-center justify-center text-center opacity-30">
+                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#44474E" strokeWidth="1.5" className="mb-2"><path d="M3 7V5a2 2 0 0 1 2-2h2"></path><path d="M17 3h2a2 2 0 0 1 2 2v2"></path><path d="M21 17v2a2 2 0 0 1-2 2h-2"></path><path d="M7 21H5a2 2 0 0 1-2-2v-2"></path><rect x="7" y="7" width="10" height="10"></rect></svg>
+                        <p className="text-[10px] font-black uppercase tracking-widest">Awaiting scans...</p>
+                      </div>
+                    );
                     return [...displayList].reverse().map((item) => (
-                      <div
-                        key={item.id}
-                        className="bg-white p-4 rounded-2xl shadow-sm border border-[#D6E3FF] flex justify-between items-center group animate-in slide-in-from-bottom-2 duration-300"
-                      >
+                      <div key={item.id} className="bg-white p-4 rounded-2xl shadow-sm border border-[#D6E3FF] flex justify-between items-center group animate-in slide-in-from-bottom-2 duration-300">
                         <div className="min-w-0">
-                          <p className="font-black text-[11px] truncate uppercase text-[#1A1C1E] leading-tight">
-                            {item.itemName}
-                          </p>
-                          <p className="text-[9px] font-mono font-bold text-[#005FB7]">
-                            {item.itemCode}
-                          </p>
+                          <p className="font-black text-[11px] truncate uppercase text-[#1A1C1E] leading-tight">{item.itemName}</p>
+                          <p className="text-[9px] font-mono font-bold text-[#005FB7]">{item.itemCode}</p>
                         </div>
-                        {/* Remove button only active in 'add' mode. In 'return' mode, scans are automatic database updates. */}
-                        {qrScannerMode === "add" && (
-                          <button
-                            onClick={() => handleToggleItem(item)}
-                            className="p-2 text-[#BA1A1A] hover:bg-red-50 rounded-lg transition-all cursor-pointer"
-                          >
-                            <svg
-                              width="14"
-                              height="14"
-                              viewBox="0 0 24 24"
-                              fill="none"
-                              stroke="currentColor"
-                              strokeWidth="3"
-                            >
-                              <line x1="18" y1="6" x2="6" y2="18"></line>
-                              <line x1="6" y1="6" x2="18" y2="18"></line>
-                            </svg>
-                          </button>
-                        )}
-                        {qrScannerMode === "return" && (
-                          <div className="w-6 h-6 bg-green-100 text-green-600 rounded-full flex items-center justify-center">
-                            <svg
-                              width="14"
-                              height="14"
-                              viewBox="0 0 24 24"
-                              fill="none"
-                              stroke="currentColor"
-                              strokeWidth="4"
-                            >
-                              <polyline points="20 6 9 17 4 12"></polyline>
-                            </svg>
-                          </div>
+                        {qrScannerMode === "add" ? (
+                          <button onClick={() => handleToggleItem(item)} className="p-2 text-[#BA1A1A] hover:bg-red-50 rounded-lg transition-all cursor-pointer"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></button>
+                        ) : (
+                          <div className="w-6 h-6 bg-green-100 text-green-600 rounded-full flex items-center justify-center"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="4"><polyline points="20 6 9 17 4 12"></polyline></svg></div>
                         )}
                       </div>
                     ));
@@ -1571,106 +1371,145 @@ export default function LogbookPage() {
               </div>
             </div>
 
-            {/* FOOTER ACTION AREA */}
             <div className="p-8 bg-white border-t border-[#E0E2EC] space-y-4">
-              <button
-                onClick={() => setIsQRScannerOpen(false)}
-                className="w-full py-5 bg-[#1A1C1E] text-white rounded-[24px] font-black text-sm uppercase tracking-widest shadow-xl cursor-pointer hover:bg-black transition-all active:scale-95"
-              >
+              <button onClick={() => setIsQRScannerOpen(false)} className="w-full py-5 bg-[#1A1C1E] text-white rounded-[24px] font-black text-sm uppercase tracking-widest shadow-xl cursor-pointer hover:bg-black transition-all active:scale-95">
                 {qrScannerMode === "add" ? "Done Scanning" : "Close Scanner"}
               </button>
-              <div className="flex items-center justify-center gap-2 opacity-40">
-                <svg
-                  width="12"
-                  height="12"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="3"
-                >
-                  <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
-                </svg>
-                <span className="text-[8px] font-black uppercase tracking-tighter">
-                  Secure Optical Session
-                </span>
-              </div>
             </div>
           </div>
         </div>
       )}
 
-      {/* ERROR MODAL: ITEM IN USE (Borrow Mode) */}
+      {/* MODAL 3: ADD ITEM SCAN CONFIRMATION */}
+      {showAddConfirmation && scannedItem && (
+        <div className="fixed inset-0 z-[260] flex items-center justify-center bg-black/70 backdrop-blur-md p-4">
+          <div className="bg-white p-8 rounded-[40px] shadow-2xl max-w-sm w-full space-y-6 border border-[#E0E2EC] animate-in zoom-in duration-200">
+            <div className="text-center">
+              <div className="w-16 h-16 bg-[#D6E3FF] text-[#005FB7] rounded-2xl flex items-center justify-center mx-auto mb-4">
+                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 5v14M5 12h14"/></svg>
+              </div>
+              <h4 className="text-xl font-bold text-[#1A1C1E]">Confirm Item Add</h4>
+              <p className="text-xs text-[#74777F] font-medium mt-1">Do you want to add this item to your list?</p>
+            </div>
+            <div className="bg-[#F1F3F8] p-4 rounded-2xl">
+              <p className="text-[10px] font-black text-[#74777F] uppercase tracking-widest">Item Detected</p>
+              <p className="font-bold text-[#1A1C1E] mt-1">{scannedItem.itemName}</p>
+              <p className="text-xs font-mono font-bold text-[#005FB7]">{scannedItem.itemCode}</p>
+            </div>
+            <div className="flex gap-3">
+              <button onClick={() => { setShowAddConfirmation(false); setScannedItem(null); }} className="flex-1 py-4 bg-[#F1F3F8] text-[#44474E] rounded-2xl text-xs font-bold uppercase tracking-widest active:scale-95 transition-all">Cancel</button>
+              <button 
+                onClick={() => { handleToggleItem(scannedItem); setShowAddConfirmation(false); setScannedItem(null); }}
+                className="flex-[1.5] py-4 bg-[#005FB7] text-white rounded-2xl text-xs font-bold uppercase tracking-widest shadow-lg shadow-blue-100 active:scale-95 transition-all"
+              >
+                Add to List
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 4: RETURN SCAN SUCCESS CONFIRMATION */}
+      {showReturnConfirmation && scannedItem && (
+        <div className="fixed inset-0 z-[260] flex items-center justify-center bg-black/70 backdrop-blur-md p-4">
+          <div className="bg-white p-8 rounded-[40px] shadow-2xl max-w-sm w-full text-center space-y-6 border border-[#E0E2EC] animate-in zoom-in duration-200">
+            <div className="w-16 h-16 bg-[#C4EED0] text-[#002107] rounded-2xl flex items-center justify-center mx-auto">
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><polyline points="20 6 9 17 4 12"></polyline></svg>
+            </div>
+            <div>
+              <h4 className="text-xl font-bold text-[#1A1C1E]">Return Successful</h4>
+              <p className="text-xs text-[#44474E] font-medium mt-1">Item <span className="font-bold">{scannedItem.itemCode}</span> has been marked as returned.</p>
+            </div>
+            <button 
+              onClick={() => { setShowReturnConfirmation(false); setScannedItem(null); }}
+              className="w-full py-4 bg-[#1A1C1E] text-white rounded-2xl text-xs font-bold active:scale-95 transition-all cursor-pointer"
+            >
+              Okay
+            </button>
+          </div>
+        </div>
+      )}
+
+{/* ERROR MODAL: ITEM IN USE */}
       {showInUseModal && (
         <div className="fixed inset-0 z-[250] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
           <div className="bg-white p-8 rounded-[32px] shadow-2xl max-w-xs w-full text-center space-y-5 animate-in zoom-in duration-200">
             <div className="w-16 h-16 bg-orange-100 text-orange-600 rounded-2xl flex items-center justify-center mx-auto">
-              <svg
-                width="32"
-                height="32"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="3"
-              >
-                <path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+            </div>
+            <div>
+              <h4 className="text-lg font-black text-[#1A1C1E] uppercase">Item is Inused</h4>
+              <p className="text-[#44474E] text-xs font-medium mt-1">This equipment is currently borrowed and has not been returned yet.</p>
+            </div>
+            <button onClick={() => setShowInUseModal(false)} className="w-full py-3 bg-[#1A1C1E] text-white rounded-xl font-bold text-xs uppercase tracking-widest active:scale-95 transition-all">Understood</button>
+          </div>
+        </div>
+      )}
+
+      {/* ERROR MODAL: ITEM NOT FOUND */}
+      {showReturnErrorModal && (
+        <div className="fixed inset-0 z-[250] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="bg-white p-8 rounded-[32px] shadow-2xl max-w-xs w-full text-center space-y-5 animate-in zoom-in duration-200">
+            <div className="w-16 h-16 bg-red-100 text-red-600 rounded-2xl flex items-center justify-center mx-auto">
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><circle cx="12" cy="12" r="10" /><line x1="15" y1="9" x2="9" y2="15" /><line x1="9" y1="9" x2="15" y2="15" /></svg>
+            </div>
+            <div>
+              <h4 className="text-lg font-bold text-[#1A1C1E]">Item Not Found</h4>
+              <p className="text-[#44474E] text-xs font-medium mt-1">The scanned item code does not match any items in this specific record batch.</p>
+            </div>
+            <button onClick={() => setShowReturnErrorModal(false)} className="w-full py-3 bg-[#1A1C1E] text-white rounded-xl font-bold text-xs active:scale-95 transition-all cursor-pointer">Try Again</button>
+          </div>
+        </div>
+      )}
+
+      {/* NEW ERROR MODAL: ITEM ALREADY ADDED (Issuance Mode) */}
+      {showAlreadyAddedModal && (
+        <div className="fixed inset-0 z-[270] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="bg-white p-8 rounded-[32px] shadow-2xl max-w-xs w-full text-center space-y-5 animate-in zoom-in duration-200">
+            <div className="w-16 h-16 bg-blue-100 text-blue-600 rounded-2xl flex items-center justify-center mx-auto">
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+                <path d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
             </div>
             <div>
-              <h4 className="text-lg font-black text-[#1A1C1E] uppercase">
-                Item is Inused
-              </h4>
-              <p className="text-[#44474E] text-xs font-medium mt-1">
-                This equipment is currently borrowed and has not been returned
-                yet.
-              </p>
+              <h4 className="text-lg font-bold text-[#1A1C1E]">Item Already Added</h4>
+              <p className="text-[#44474E] text-xs font-medium mt-1">This item is already included in your current selection list.</p>
             </div>
-            <button
-              onClick={() => setShowInUseModal(false)}
-              className="w-full py-3 bg-[#1A1C1E] text-white rounded-xl font-bold text-xs uppercase tracking-widest active:scale-95 transition-all"
+            <button 
+              onClick={() => setShowAlreadyAddedModal(false)} 
+              className="w-full py-3 bg-[#005FB7] text-white rounded-xl font-bold text-xs active:scale-95 transition-all cursor-pointer"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* NEW ERROR MODAL: ITEM ALREADY RETURNED (Return Mode) */}
+      {showAlreadyReturnedModal && (
+        <div className="fixed inset-0 z-[270] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="bg-white p-8 rounded-[32px] shadow-2xl max-w-xs w-full text-center space-y-5 animate-in zoom-in duration-200">
+            <div className="w-16 h-16 bg-green-100 text-green-600 rounded-2xl flex items-center justify-center mx-auto">
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+                <polyline points="22 4 12 14.01 9 11.01" />
+              </svg>
+            </div>
+            <div>
+              <h4 className="text-lg font-bold text-[#1A1C1E]">Item Already Returned</h4>
+              <p className="text-[#44474E] text-xs font-medium mt-1">This item has already been scanned and processed as returned in this batch.</p>
+            </div>
+            <button 
+              onClick={() => setShowAlreadyReturnedModal(false)} 
+              className="w-full py-3 bg-[#1A1C1E] text-white rounded-xl font-bold text-xs active:scale-95 transition-all cursor-pointer"
             >
               Understood
             </button>
           </div>
         </div>
       )}
-
-      {/* ERROR MODAL: ITEM NOT FOUND/MATCH (Return Mode) */}
-      {showReturnErrorModal && (
-        <div className="fixed inset-0 z-[250] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-          <div className="bg-white p-8 rounded-[32px] shadow-2xl max-w-xs w-full text-center space-y-5 animate-in zoom-in duration-200">
-            <div className="w-16 h-16 bg-red-100 text-red-600 rounded-2xl flex items-center justify-center mx-auto">
-              <svg
-                width="32"
-                height="32"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="3"
-              >
-                <circle cx="12" cy="12" r="10" />
-                <line x1="15" y1="9" x2="9" y2="15" />
-                <line x1="9" y1="9" x2="15" y2="15" />
-              </svg>
-            </div>
-            <div>
-              <h4 className="text-lg font-black text-[#1A1C1E] uppercase">
-                Item Not Found
-              </h4>
-              <p className="text-[#44474E] text-xs font-medium mt-1">
-                The scanned item code does not match any items in this specific
-                record batch.
-              </p>
-            </div>
-            <button
-              onClick={() => setShowReturnErrorModal(false)}
-              className="w-full py-3 bg-[#1A1C1E] text-white rounded-xl font-bold text-xs uppercase tracking-widest active:scale-95 transition-all"
-            >
-              Try Again
-            </button>
-          </div>
-        </div>
-      )}
-
+	  
+	  
       {/* MODAL 3: VIEW ALL RECORD / BATCH PREVIEW */}
       {isDetailModalOpen && selectedBatch && (
         <>
