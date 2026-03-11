@@ -109,11 +109,6 @@ export default function LogbookPage() {
 
   // --- HELPER FUNCTIONS ---
 
-  /**
-   * Enhanced Safe Resume:
-   * 1. If paused (State 3), it resumes.
-   * 2. If stopped or idle (after file upload), it forces a restart via toggleCamera.
-   */
   const safeResume = () => {
     setTimeout(async () => {
       if (!scannerRef.current) return;
@@ -135,10 +130,6 @@ export default function LogbookPage() {
     }, 200);
   };
 
-  /**
-   * Internal helper to start or restart the scanner instance
-   * Uses a square qrbox to ensure logic matches the square UI ratio
-   */
   const startScanner = async () => {
     if (!scannerRef.current) return;
     try {
@@ -147,7 +138,7 @@ export default function LogbookPage() {
         { 
           fps: 20, 
           qrbox: { width: 250, height: 250 },
-          aspectRatio: 1.0 // Enforces square frame logic
+          aspectRatio: 1.0 
         },
         (text: string) => processQrResult(text),
         () => {}
@@ -159,7 +150,8 @@ export default function LogbookPage() {
   };
 
   /**
-   * Generates a professional high-pitched scanner beep (Sine Wave at 1200Hz).
+   * Generates a loud, sharp "Supermarket" beep sound.
+   * Frequency increased to 2500Hz for that classic retail chirp.
    */
   const playScanSound = () => {
     try {
@@ -168,22 +160,23 @@ export default function LogbookPage() {
       const gainNode = audioCtx.createGain();
 
       oscillator.type = "sine"; 
-      oscillator.frequency.setValueAtTime(1200, audioCtx.currentTime); 
+      oscillator.frequency.setValueAtTime(2500, audioCtx.currentTime); 
       
-      gainNode.gain.setValueAtTime(0.1, audioCtx.currentTime); 
+      // Fast attack and decay for a sharp "beep"
+      gainNode.gain.setValueAtTime(0, audioCtx.currentTime);
+      gainNode.gain.linearRampToValueAtTime(0.2, audioCtx.currentTime + 0.01); 
       gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
 
       oscillator.connect(gainNode);
       gainNode.connect(audioCtx.destination);
 
       oscillator.start();
-      oscillator.stop(audioCtx.currentTime + 0.15); 
+      oscillator.stop(audioCtx.currentTime + 0.12); 
     } catch (err) {
       console.error("Audio beep failed:", err);
     }
   };
 
-  // Extracts pattern CA-000-00 from strings/URLs
   const extractItemCode = (input: string) => {
     const pattern = /[A-Z]{2}-\d{3}-\d{2}/;
     const match = input.match(pattern);
