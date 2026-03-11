@@ -1352,20 +1352,23 @@ export default function LogbookPage() {
 
             <div className="flex-1 overflow-y-auto custom-scrollbar p-8 pt-0 space-y-8">
               <div className="flex flex-col items-center">
-                <div className="relative w-full aspect-square max-w-[380px] overflow-hidden rounded-[40px] bg-black border-[12px] border-[#F1F3F8] shadow-2xl group">
+                {/* Updated Scanner Container: Removed blue border lines */}
+                <div className="relative w-full aspect-square max-w-[380px] overflow-hidden rounded-[40px] bg-black shadow-2xl group">
                   <div id="reader" className="w-full h-full object-cover"></div>
-                  <div className="absolute inset-0 border-[30px] border-black/30 pointer-events-none"></div>
-                  <div className="absolute top-8 left-8 w-10 h-10 border-t-4 border-l-4 border-[#005FB7] rounded-tl-xl"></div>
-                  <div className="absolute top-8 right-8 w-10 h-10 border-t-4 border-r-4 border-[#005FB7] rounded-tr-xl"></div>
-                  <div className="absolute bottom-8 left-8 w-10 h-10 border-b-4 border-l-4 border-[#005FB7] rounded-bl-xl"></div>
-                  <div className="absolute bottom-8 right-8 w-10 h-10 border-b-4 border-r-4 border-[#005FB7] rounded-br-xl"></div>
-                  <div className="absolute top-0 left-0 w-full h-1.5 bg-[#005FB7] shadow-[0_0_20px_#005FB7] animate-scan z-10"></div>
-                  <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-2 bg-black/60 backdrop-blur-md px-4 py-2 rounded-full border border-white/20">
-                    <div className="w-2 h-2 bg-green-500 rounded-full animate-ping"></div>
-                    <span className="text-[10px] font-black text-white uppercase tracking-widest">
-                      {isCameraActive ? "Scanner Active" : "Camera Paused"}
-                    </span>
-                  </div>
+                  
+                  {/* Scanner Overlay - Dimmed edges */}
+                  <div className="absolute inset-0 border-[40px] border-black/40 pointer-events-none"></div>
+                  
+                  {/* ENHANCED CROSSHAIR BORDERS (White, Thicker, and Larger) */}
+                  <div className="absolute top-10 left-10 w-14 h-14 border-t-[6px] border-l-[6px] border-white rounded-tl-2xl"></div>
+                  <div className="absolute top-10 right-10 w-14 h-14 border-t-[6px] border-r-[6px] border-white rounded-tr-2xl"></div>
+                  <div className="absolute bottom-10 left-10 w-14 h-14 border-b-[6px] border-l-[6px] border-white rounded-bl-2xl"></div>
+                  <div className="absolute bottom-10 right-10 w-14 h-14 border-b-[6px] border-r-[6px] border-white rounded-br-2xl"></div>
+                  
+                  {/* Scanning Animation Line */}
+                  <div className="absolute top-0 left-0 w-full h-1 bg-white/50 shadow-[0_0_20px_rgba(255,255,255,0.8)] animate-scan z-10"></div>
+                  
+                  {/* REMOVED: Status Labels and Blinking Circle Indicators */}
                 </div>
 
                 <div className="flex gap-3 mt-6 w-full max-w-[380px]">
@@ -1448,7 +1451,8 @@ export default function LogbookPage() {
           </div>
         </div>
       )}
-
+	  
+	  
       {/* MODAL 3: ADD ITEM SCAN CONFIRMATION */}
       {showAddConfirmation && scannedItem && (
         <div className="fixed inset-0 z-[260] flex items-center justify-center bg-black/70 backdrop-blur-md p-4">
