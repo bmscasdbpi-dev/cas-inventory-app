@@ -12,10 +12,8 @@ import {
   updateBatchStatus,     
   updateSingleLogEntry, 
   updateItemDetails,
-  updateLogBatch // <--- ADD THIS LINE
+  updateLogBatch 
 } from "../../../actions/logActions";
-
-import { Html5QrcodeScanner } from "html5-qrcode";
 
 interface LogEntry {
   id: number;
@@ -42,7 +40,6 @@ export default function LogbookPage() {
   const [itemSearchText, setItemSearchText] = useState("");
   const [showSuggestions, setShowSuggestions] = useState(false);
   
-
   // Modal States
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isItemPickerOpen, setIsItemPickerOpen] = useState(false);
@@ -53,7 +50,8 @@ export default function LogbookPage() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [showQRScanner, setShowQRScanner] = useState(false);
   const [showScanError, setShowScanError] = useState(false);
-  
+  const [qrScannerMode, setQrScannerMode] = useState<"add" | "return">("add");
+  const [isCameraActive, setIsCameraActive] = useState(false);
 
   // Data States
   const [selectedItems, setSelectedItems] = useState<any[]>([]);
@@ -69,9 +67,31 @@ export default function LogbookPage() {
   const [pickerSearch, setPickerSearch] = useState("");
   const [activeCategory, setActiveCategory] = useState("All");
 
+  // --- REFS ---
   const router = useRouter();
   const supabase = createClient();
   const sidebarRef = useRef<HTMLDivElement>(null);
+  const scannerRef = useRef<any>(null); 
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // stateRef handles the "Stale Closure" problem so the scanner always sees the latest data
+  const stateRef = useRef({ 
+    selectedItems, 
+    selectedBatch, 
+    checkedItems, 
+    qrScannerMode, 
+    allItems 
+  });
+
+  useEffect(() => {
+    stateRef.current = { 
+      selectedItems, 
+      selectedBatch, 
+      checkedItems, 
+      qrScannerMode, 
+      allItems 
+    };
+  }, [selectedItems, selectedBatch, checkedItems, qrScannerMode, allItems]);
 
   const categories = ["All", "Cameras & Accessories", "Lights & Accessories", "Sound & Accessories", "Computers & Peripherals", "Office Appliance", "Others"];
 
@@ -91,14 +111,11 @@ export default function LogbookPage() {
     });
   });
 
-  // --- BATCH GROUPING LOGIC (UPDATED FOR SESSION_ID) ---
+  // --- BATCH GROUPING LOGIC ---
   const groupedLogs = useMemo(() => {
     const groups: { [key: number]: any } = {};
-
     logs.forEach((log) => {
-      // Gumagamit na tayo ng sessionId para sa mas accurate na grouping
       const key = log.sessionId; 
-
       if (!groups[key]) {
         groups[key] = {
           sessionId: log.sessionId,
@@ -155,8 +172,6 @@ export default function LogbookPage() {
   }, [router, supabase]);
 
   // --- HANDLERS ---
-  const isSidebarExpanded = !sidebarMinimized || isHoveringSidebar;
-
   const handleToggleItem = (item: any) => {
     setSelectedItems(prev => prev.find(i => i.id === item.id) ? prev.filter(i => i.id !== item.id) : [...prev, item]);
   };
@@ -165,21 +180,15 @@ export default function LogbookPage() {
     setCheckedItems(prev => prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]);
   };
 
-  // --- SAVE RECORD (UPDATED PAYLOAD) ---
   const handleSaveRecord = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (selectedItems.length === 0) return alert("Pumili muna ng gamit.");
-
     const formData = new FormData(e.currentTarget);
     const claim = formData.get("claimDate") as string;
     const returnDt = formData.get("returnExpectedDate") as string;
-
-    if (new Date(returnDt) < new Date(claim)) {
-      return alert("Ang return date ay hindi pwedeng mas maaga sa pickup date.");
-    }
+    if (new Date(returnDt) < new Date(claim)) return alert("Ang return date ay hindi pwedeng mas maaga sa pickup date.");
 
     setIsSubmitting(true);
-
     const payload = {
       borrowedBy: formData.get("borrowedBy") as string,
       companyName: formData.get("companyName") as string,      
@@ -188,81 +197,116 @@ export default function LogbookPage() {
       purposeDate: formData.get("purposeDate") as string,
       claimDate: claim,
       returnExpectedDate: returnDt,
-      itemIds: selectedItems.map(item => Number(item.id)), // Siguradong number
+      itemIds: selectedItems.map(item => Number(item.id)),
     };
 
-const result = await useEquipment(payload);
-
+    const result = await useEquipment(payload);
     if (result.success) {
       setIsAddModalOpen(false);
       setSelectedItems([]);
       await fetchData();
     } else {
-      const errorMessage = (result as { error?: string }).error || "Failed to save record";
-      alert(errorMessage);
-    }
-    
-    setIsSubmitting(false); // Move this inside the function
-  }; // <--- ADD THIS BRACE to properly close handleSaveRecord
-
-const handleBatchReturn = async () => {
-    // 1. Validation
-    if (checkedItems.length === 0 || !manualReturnDate) {
-      return alert("Pumili ng items at petsa.");
-    }
-
-    // 2. Guard Clause
-    if (!selectedBatch?.items) {
-      return alert("Walang batch na napili o walang items sa batch na ito.");
-    }
-
-    setIsSubmitting(true);
-    
-    // 3. Get IDs for database update
-    const itemIdsToUpdate = selectedBatch.items
-      .filter((i: any) => checkedItems.includes(i.id))
-      .map((i: any) => i.itemId);
-
-    const result = await returnEquipmentBatch(checkedItems, itemIdsToUpdate, manualReturnDate);
-    
-    if (result.success) {
-      // OPTIONAL: I-update ang UI state para makita agad ang "Returned" status
-      const updatedItems = selectedBatch.items.map((i: LogEntry) => 
-        checkedItems.includes(i.id) 
-          ? { ...i, dateReturned: manualReturnDate, requestStatus: "Returned" } 
-          : i 
-      );
-      setSelectedBatch({ ...selectedBatch, items: updatedItems });
-
-      await fetchData();
-      setIsDetailModalOpen(false);
-      setCheckedItems([]);
-      setManualReturnDate("");
-    } else {
-      alert("Failed to return items.");
+      alert((result as { error?: string }).error || "Failed to save record");
     }
     setIsSubmitting(false);
-};
+  };
 
-const handleLogout = async () => {
-  await supabase.auth.signOut();
-  router.push("/login");
-};
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    router.push("/login");
+  };
 
-  // QR Scanner logic
-  useEffect(() => {
-    let scanner: Html5QrcodeScanner | null = null;
-    if (isQRScannerOpen) {
-      scanner = new Html5QrcodeScanner("reader", { fps: 15, qrbox: 250 }, false);
-      scanner.render((text) => {
-        const found = allItems.find((i: any) => text.includes(i.itemCode) && i.itemCode !== "");
-        if (found && !selectedItems.find(s => s.id === found.id) && found.availabilityStatus === "Available") {
-          handleToggleItem(found);
-        }
-      }, () => {});
+  // --- QR SCANNER CORE LOGIC ---
+
+  // Extracts pattern CA-000-00 from strings/URLs
+  const extractItemCode = (input: string) => {
+    const pattern = /[A-Z]{2}-\d{3}-\d{2}/; 
+    const match = input.match(pattern);
+    return match ? match[0] : input; 
+  };
+
+  const processQrResult = (decodedText: string) => {
+    const cleanCode = extractItemCode(decodedText);
+    const { qrScannerMode, allItems, selectedItems, selectedBatch, checkedItems } = stateRef.current;
+
+    if (qrScannerMode === "add") {
+      const found = allItems.find((i: any) => cleanCode === i.itemCode);
+      if (found && !selectedItems.find(s => s.id === found.id) && found.availabilityStatus === "Available") {
+        handleToggleItem(found);
+      }
+    } else if (qrScannerMode === "return") {
+      const foundInBatch = selectedBatch?.items?.find((i: any) => 
+        cleanCode === i.itemCode && i.requestStatus !== "Returned"
+      );
+      if (foundInBatch && !checkedItems.includes(foundInBatch.id)) {
+        handleToggleCheck(foundInBatch.id);
+      }
     }
-    return () => { scanner?.clear().catch(() => {}); };
-  }, [isQRScannerOpen, allItems, selectedItems]);
+  };
+
+  useEffect(() => {
+    if (isQRScannerOpen) {
+      const timeoutId = setTimeout(async () => {
+        try {
+          const { Html5Qrcode } = await import("html5-qrcode");
+          const scanner = new Html5Qrcode("reader");
+          scannerRef.current = scanner;
+
+          await scanner.start(
+            { facingMode: "environment" },
+            { fps: 20, qrbox: { width: 250, height: 250 } },
+            (text) => processQrResult(text),
+            () => {} 
+          );
+          setIsCameraActive(true);
+        } catch (err) {
+          console.error("Scanner error:", err);
+        }
+      }, 300);
+
+      return () => {
+        clearTimeout(timeoutId);
+        if (scannerRef.current && scannerRef.current.isScanning) {
+          scannerRef.current.stop().then(() => {
+            scannerRef.current.clear();
+            setIsCameraActive(false);
+          });
+        }
+      };
+    }
+  }, [isQRScannerOpen]);
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !scannerRef.current) return;
+    try {
+      if (scannerRef.current.isScanning) {
+        await scannerRef.current.stop();
+        setIsCameraActive(false);
+      }
+      const decodedText = await scannerRef.current.scanFile(file, false);
+      processQrResult(decodedText);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    } catch (err) {
+      alert("No QR Code found in this image.");
+    }
+  };
+
+  const toggleCamera = async () => {
+    if (!scannerRef.current) return;
+    if (isCameraActive) {
+      await scannerRef.current.stop();
+      setIsCameraActive(false);
+    } else {
+      await scannerRef.current.start(
+        { facingMode: "environment" },
+        { fps: 20, qrbox: 250 },
+        (text: string) => processQrResult(text),
+        () => {}
+      );
+      setIsCameraActive(true);
+    }
+  };
 
   if (loading) return (
     <div className="min-h-screen flex flex-col items-center justify-center bg-[#FDFBFF]">
@@ -270,7 +314,6 @@ const handleLogout = async () => {
     </div>
   );
 
-  // Dito itutuloy ang Return/UI elements...
   return (
     <div className="flex min-h-screen bg-[#FDFBFF] text-[#1A1C1E] font-sans overflow-x-hidden">
       
@@ -619,14 +662,17 @@ const handleLogout = async () => {
               >
                 Browse Items
               </button>
-              <button 
-                type="button" 
-                disabled={isSubmitting}
-                onClick={() => setIsQRScannerOpen(true)} 
-                className="flex items-center gap-2 px-5 py-2.5 bg-[#005FB7] text-white text-xs font-bold rounded-xl cursor-pointer transition-all hover:bg-[#004A8F] disabled:opacity-50"
-              >
-                Scan QR
-              </button>
+<button 
+  type="button" 
+  disabled={isSubmitting}
+  onClick={() => {
+    setQrScannerMode("add");
+    setIsQRScannerOpen(true);
+  }} 
+  className="flex items-center gap-2 px-5 py-2.5 bg-[#F1F3F8] text-[#005FB7] text-xs font-bold rounded-xl cursor-pointer transition-all hover:bg-[#D6E3FF] disabled:opacity-50"
+>
+  Scan QR
+</button>
             </div>
           </div>
 
@@ -831,7 +877,7 @@ const handleLogout = async () => {
 
 {/* MODAL 1: FIXED ITEM PICKER (CLEAN & SORTED OLDEST FIRST) */}
       {isItemPickerOpen && (
-        <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/60 backdrop-blur-md p-4 text-sm">
+        <div className="fixed inset-0 z-[210] flex items-center justify-center bg-black/60 backdrop-blur-md p-4 text-sm">
           {/* Main Container */}
           <div className="bg-white w-full max-w-5xl rounded-[40px] shadow-2xl flex flex-col lg:flex-row h-[85vh] overflow-hidden border border-white/20 relative">
             
@@ -973,105 +1019,110 @@ const handleLogout = async () => {
         </div>
       )}
 
-{/* MODAL 2: ENHANCED CONTINUOUS QR SCANNER */}
-      {isQRScannerOpen && (
-        <div className="fixed inset-0 z-[130] flex items-center justify-center bg-black/80 backdrop-blur-md p-4">
-          <div className="bg-white w-full max-w-5xl rounded-[40px] flex flex-col lg:flex-row h-[85vh] overflow-hidden shadow-2xl border border-white/20">
+{/* MODAL 2: ENHANCED CONTINUOUS QR SCANNER (SINGLE COLUMN REVAMP) */}
+{isQRScannerOpen && (
+  <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 backdrop-blur-md p-4">
+    <div className="bg-white w-full max-w-xl rounded-[40px] flex flex-col h-[90vh] overflow-hidden shadow-2xl border border-white/20">
+      
+      {/* HEADER SECTION */}
+      <div className="p-8 pb-4 bg-white flex justify-between items-start">
+        <div>
+          <h3 className="font-bold text-2xl text-[#1A1C1E] tracking-tight">Smart QR Scanner</h3>
+          <p className="text-xs text-[#74777F] font-medium">Automatic detection for rapid processing.</p>
+        </div>
+        <button 
+          onClick={() => setIsQRScannerOpen(false)} 
+          className="p-3 bg-[#F1F3F8] rounded-full cursor-pointer hover:bg-[#E2E2E6] transition-colors"
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+        </button>
+      </div>
+
+      <div className="flex-1 overflow-y-auto custom-scrollbar p-8 pt-0 space-y-8">
+        
+        {/* CAMERA VIEWPORT SECTION */}
+        <div className="flex flex-col items-center">
+          <div className="relative w-full aspect-square max-w-[380px] overflow-hidden rounded-[40px] bg-black border-[12px] border-[#F1F3F8] shadow-2xl group">
+            <div id="reader" className="w-full h-full object-cover"></div>
             
-            {/* LEFT SECTION: CAMERA VIEWPORT */}
-            <div className="flex-1 p-8 bg-white flex flex-col items-center justify-between">
-              <div className="w-full flex justify-between items-center mb-4">
-                <div>
-                  <h3 className="font-bold text-2xl text-[#1A1C1E] tracking-tight">Smart QR Scanner</h3>
-                  <p className="text-xs text-[#74777F] font-medium">I-tapat ang QR code sa camera para sa automatic detection.</p>
-                </div>
-                <button onClick={() => setIsQRScannerOpen(false)} className="lg:hidden p-3 bg-[#F1F3F8] rounded-full cursor-pointer hover:bg-[#E2E2E6] transition-colors">✕</button>
-              </div>
+            {/* SCANNING OVERLAYS */}
+            <div className="absolute inset-0 border-[30px] border-black/30 pointer-events-none"></div>
+            
+            {/* CORNER BRACKETS */}
+            <div className="absolute top-8 left-8 w-10 h-10 border-t-4 border-l-4 border-[#005FB7] rounded-tl-xl"></div>
+            <div className="absolute top-8 right-8 w-10 h-10 border-t-4 border-r-4 border-[#005FB7] rounded-tr-xl"></div>
+            <div className="absolute bottom-8 left-8 w-10 h-10 border-b-4 border-l-4 border-[#005FB7] rounded-bl-xl"></div>
+            <div className="absolute bottom-8 right-8 w-10 h-10 border-b-4 border-r-4 border-[#005FB7] rounded-br-xl"></div>
 
-              {/* VIEWPORT AREA */}
-              <div className="relative w-full aspect-square max-w-[420px] overflow-hidden rounded-[40px] bg-black border-[12px] border-[#F1F3F8] shadow-2xl group">
-                <div id="reader" className="w-full h-full"></div>
-                
-                {/* SCANNING OVERLAYS */}
-                <div className="absolute inset-0 border-[30px] border-black/30 pointer-events-none"></div>
-                
-                {/* CORNER BRACKETS */}
-                <div className="absolute top-10 left-10 w-10 h-10 border-t-4 border-l-4 border-[#005FB7] rounded-tl-xl"></div>
-                <div className="absolute top-10 right-10 w-10 h-10 border-t-4 border-r-4 border-[#005FB7] rounded-tr-xl"></div>
-                <div className="absolute bottom-10 left-10 w-10 h-10 border-b-4 border-l-4 border-[#005FB7] rounded-bl-xl"></div>
-                <div className="absolute bottom-10 right-10 w-10 h-10 border-b-4 border-r-4 border-[#005FB7] rounded-br-xl"></div>
-
-                {/* ANIMATED SCAN LINE */}
-                <div className="absolute top-0 left-0 w-full h-1.5 bg-[#005FB7] shadow-[0_0_20px_#005FB7] animate-scan z-10"></div>
-                
-                {/* STATUS INDICATOR */}
-                <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-2 bg-black/60 backdrop-blur-md px-4 py-2 rounded-full border border-white/20">
-                  <div className="w-2 h-2 bg-green-500 rounded-full animate-ping"></div>
-                  <span className="text-[10px] font-black text-white uppercase tracking-widest">Scanner Active</span>
-                </div>
-              </div>
-
-              {/* HELPER TEXT */}
-              <p className="text-[10px] text-[#74777F] font-bold uppercase tracking-tighter mt-4 text-center">
-                Maaaring mag-scan ng maraming items nang sunod-sunod.
-              </p>
-            </div>
-
-            {/* RIGHT SECTION: SCANNED ITEMS SIDEBAR */}
-            <div className="w-full lg:w-85 bg-[#F7F9FF] p-8 flex flex-col border-t lg:border-t-0 lg:border-l border-[#E0E2EC]">
-              <div className="flex justify-between items-center mb-8">
-                <h4 className="font-black text-xs text-[#74777F] uppercase tracking-[0.2em]">Scanned Batch</h4>
-                <div className="bg-[#005FB7] text-white text-[10px] font-black px-3 py-1 rounded-full shadow-lg shadow-blue-100 animate-in zoom-in">
-                  {selectedItems.length} Items
-                </div>
-              </div>
-
-              {/* LIST AREA */}
-              <div className="flex-1 overflow-y-auto space-y-3 custom-scrollbar pr-1">
-                {selectedItems.length === 0 ? (
-                  <div className="h-full flex flex-col items-center justify-center text-center opacity-30">
-                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#44474E" strokeWidth="1.5" className="mb-4"><path d="M3 7V5a2 2 0 0 1 2-2h2"></path><path d="M17 3h2a2 2 0 0 1 2 2v2"></path><path d="M21 17v2a2 2 0 0 1-2 2h-2"></path><path d="M7 21H5a2 2 0 0 1-2-2v-2"></path><rect x="7" y="7" width="10" height="10"></rect></svg>
-                    <p className="text-[10px] font-black uppercase tracking-widest">No items scanned yet</p>
-                  </div>
-                ) : (
-                  [...selectedItems].reverse().map(item => (
-                    <div 
-                      key={item.id} 
-                      className="bg-white p-4 rounded-2xl shadow-sm border border-[#D6E3FF] flex justify-between items-center group animate-in slide-in-from-right-4 duration-300"
-                    >
-                      <div className="min-w-0">
-                        <p className="font-black text-[11px] truncate uppercase text-[#1A1C1E] leading-tight">{item.itemName}</p>
-                        <p className="text-[9px] font-mono font-bold text-[#005FB7]">{item.itemCode}</p>
-                      </div>
-                      <button 
-                        onClick={() => handleToggleItem(item)} 
-                        className="p-2 text-[#BA1A1A] hover:bg-red-50 rounded-lg transition-all cursor-pointer"
-                        title="Remove item"
-                      >
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-                      </button>
-                    </div>
-                  ))
-                )}
-              </div>
-
-              {/* ACTION AREA */}
-              <div className="mt-8 space-y-4">
-                <button 
-                  onClick={() => setIsQRScannerOpen(false)} 
-                  className="w-full py-5 bg-[#1A1C1E] text-white rounded-3xl font-black text-sm uppercase tracking-widest shadow-xl cursor-pointer hover:bg-black transition-all active:scale-95"
-                >
-                  Finish Scanning
-                </button>
-                <div className="flex items-center justify-center gap-2 opacity-50">
-                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
-                   <span className="text-[8px] font-black uppercase tracking-tighter">Verified Secured Scan</span>
-                </div>
-              </div>
+            {/* ANIMATED SCAN LINE */}
+            <div className="absolute top-0 left-0 w-full h-1.5 bg-[#005FB7] shadow-[0_0_20px_#005FB7] animate-scan z-10"></div>
+            
+            {/* STATUS INDICATOR */}
+            <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-2 bg-black/60 backdrop-blur-md px-4 py-2 rounded-full border border-white/20">
+              <div className="w-2 h-2 bg-green-500 rounded-full animate-ping"></div>
+              <span className="text-[10px] font-black text-white uppercase tracking-widest">Scanner Active</span>
             </div>
           </div>
+          <p className="text-[10px] text-[#74777F] font-bold uppercase tracking-tighter mt-4 text-center">
+            Position the QR code within the frame for automatic detection.
+          </p>
         </div>
-      )}
+
+        {/* SCANNED ITEMS LIST SECTION */}
+        <div className="bg-[#F7F9FF] rounded-[32px] p-6 border border-[#E0E2EC]">
+          <div className="flex justify-between items-center mb-6">
+            <h4 className="font-black text-xs text-[#74777F] uppercase tracking-[0.2em]">Current Batch</h4>
+            <div className="bg-[#005FB7] text-white text-[10px] font-black px-3 py-1 rounded-full shadow-lg shadow-blue-100">
+              {qrScannerMode === "add" ? selectedItems.length : checkedItems.length} Items
+            </div>
+          </div>
+
+          <div className="space-y-3 max-h-[250px] overflow-y-auto custom-scrollbar pr-1">
+            {/* logic to show items based on mode */}
+            {((qrScannerMode === "add" ? selectedItems : (selectedBatch?.items?.filter((i:any) => checkedItems.includes(i.id)) || []))).length === 0 ? (
+              <div className="py-8 flex flex-col items-center justify-center text-center opacity-30">
+                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#44474E" strokeWidth="1.5" className="mb-2"><path d="M3 7V5a2 2 0 0 1 2-2h2"></path><path d="M17 3h2a2 2 0 0 1 2 2v2"></path><path d="M21 17v2a2 2 0 0 1-2 2h-2"></path><path d="M7 21H5a2 2 0 0 1-2-2v-2"></path><rect x="7" y="7" width="10" height="10"></rect></svg>
+                <p className="text-[10px] font-black uppercase tracking-widest">Awaiting scans...</p>
+              </div>
+            ) : (
+              [...(qrScannerMode === "add" ? selectedItems : (selectedBatch?.items?.filter((i:any) => checkedItems.includes(i.id)) || []))].reverse().map(item => (
+                <div 
+                  key={item.id} 
+                  className="bg-white p-4 rounded-2xl shadow-sm border border-[#D6E3FF] flex justify-between items-center group animate-in slide-in-from-bottom-2 duration-300"
+                >
+                  <div className="min-w-0">
+                    <p className="font-black text-[11px] truncate uppercase text-[#1A1C1E] leading-tight">{item.itemName}</p>
+                    <p className="text-[9px] font-mono font-bold text-[#005FB7]">{item.itemCode}</p>
+                  </div>
+                  <button 
+                    onClick={() => qrScannerMode === "add" ? handleToggleItem(item) : handleToggleCheck(item.id)} 
+                    className="p-2 text-[#BA1A1A] hover:bg-red-50 rounded-lg transition-all cursor-pointer"
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                  </button>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* FOOTER ACTION AREA */}
+      <div className="p-8 bg-white border-t border-[#E0E2EC] space-y-4">
+        <button 
+          onClick={() => setIsQRScannerOpen(false)} 
+          className="w-full py-5 bg-[#1A1C1E] text-white rounded-[24px] font-black text-sm uppercase tracking-widest shadow-xl cursor-pointer hover:bg-black transition-all active:scale-95"
+        >
+          Finish & Confirm
+        </button>
+        <div className="flex items-center justify-center gap-2 opacity-40">
+           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
+           <span className="text-[8px] font-black uppercase tracking-tighter">Secure Optical Session</span>
+        </div>
+      </div>
+    </div>
+  </div>
+)}
 
 {/* MODAL 3: VIEW ALL RECORD / BATCH PREVIEW */}
 {isDetailModalOpen && selectedBatch && (
@@ -1148,45 +1199,41 @@ const handleLogout = async () => {
               placeholder="Waiting for scan..."
               className="w-full bg-white/5 border border-white/10 rounded-2xl px-4 py-4 text-center text-blue-400 font-mono text-lg outline-none focus:ring-2 ring-blue-500/50 transition-all placeholder:text-gray-600"
               onKeyDown={async (e) => {
-                if (e.key === 'Enter') {
-                  const scannedCode = e.currentTarget.value.trim();
-                  if (!scannedCode) return;
+  if (e.key === 'Enter') {
+    const scannedCode = e.currentTarget.value.trim();
+    if (!scannedCode) return;
 
-                  const matchedItem = selectedBatch.items.find((i: any) => i.itemCode === scannedCode);
-                  
-                  if (matchedItem) {
-                    // 1. Play Success Sound (Web Audio API)
-                    const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
-                    const oscillator = audioCtx.createOscillator();
-                    const gainNode = audioCtx.createGain();
-                    oscillator.connect(gainNode);
-                    gainNode.connect(audioCtx.destination);
-                    oscillator.type = 'sine';
-                    oscillator.frequency.setValueAtTime(880, audioCtx.currentTime); // High pitch beep
-                    gainNode.gain.setValueAtTime(0.1, audioCtx.currentTime);
-                    oscillator.start();
-                    oscillator.stop(audioCtx.currentTime + 0.1);
+    // 1. Find the item inside the current batch that isn't returned yet
+    const matchedItem = selectedBatch.items.find(
+      (i: any) => i.itemCode === scannedCode && i.requestStatus !== "Returned"
+    );
+    
+    if (matchedItem) {
+      const today = new Date().toISOString().split('T')[0];
+      
+      // 2. Update the Screen (UI) immediately
+      const updatedItems = selectedBatch.items.map((i: any) => 
+        i.itemCode === scannedCode ? { ...i, requestStatus: "Returned", dateReturned: today } : i
+      );
+      setSelectedBatch({ ...selectedBatch, items: updatedItems });
 
-                    const today = new Date().toISOString().split('T')[0];
-                    
-                    // 2. Update UI
-                    const updatedItems = selectedBatch.items.map((i: any) => 
-					  i.itemCode === scannedCode ? { ...i, requestStatus: "Returned", dateReturned: today } : i
-					);
-                    setSelectedBatch({ ...selectedBatch, items: updatedItems });
-                    
-                    // 3. Reset Input for Continuous Scanning
-                    e.currentTarget.value = "";
-                    
-                    // 4. Update Database
-                    await updateSingleLogEntry(matchedItem.id, matchedItem.itemId, { requestStatus: "Returned", dateReturned: today });
-                    await fetchData();
-                  } else {
-                    setShowScanError(true);
-                    e.currentTarget.value = ""; 
-                  }
-                }
-              }}
+      // 3. Clear the input so you can scan the next item immediately
+      e.currentTarget.value = "";
+      
+      // 4. Update the Database
+      await updateSingleLogEntry(matchedItem.id, matchedItem.itemId, { 
+        requestStatus: "Returned", 
+        dateReturned: today 
+      });
+      await fetchData(); // Refresh everything in the background
+      
+    } else {
+      // If item is not in this batch or already returned, show error
+      setShowScanError(true);
+      e.currentTarget.value = ""; 
+    }
+  }
+}}
             />
 
             {/* LIVE FEED OF SCANNED ITEMS */}
@@ -1381,10 +1428,18 @@ const handleLogout = async () => {
             <div className="flex justify-between items-center mb-4">
               <h3 className="font-black">Items</h3>
               <div className="flex gap-2">
-                <button onClick={() => setShowQRScanner(true)} className="text-[10px] md:text-[10px] font-bold text-[#005FB7] uppercase tracking-wider hover:bg-[#D0E4FF] transition-colors cursor-pointer flex items-center gap-1.5 px-3 py-2 bg-[#E8F0FF] rounded-lg border border-[#ADCFFF] active:scale-95 shadow-sm">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M3 7V5a2 2 0 0 1 2-2h2m10 0h2a2 2 0 0 1 2 2v2m0 10v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M7 7h10v10H7z"/></svg>
-                  Use QR Scanner
-                </button>
+<button 
+  onClick={() => {
+    setQrScannerMode("return");
+    setIsQRScannerOpen(true);
+  }} 
+  className="text-[10px] md:text-[10px] font-bold text-[#005FB7] uppercase tracking-wider hover:bg-[#D0E4FF] transition-colors cursor-pointer flex items-center gap-1.5 px-3 py-2 bg-[#E8F0FF] rounded-lg border border-[#ADCFFF] active:scale-95 shadow-sm"
+>
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+    <path d="M3 7V5a2 2 0 0 1 2-2h2m10 0h2a2 2 0 0 1 2 2v2m0 10v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M7 7h10v10H7z"/>
+  </svg>
+  Use QR Scanner
+</button>
                 <button onClick={() => setShowBulkConfirm(true)} className="text-[9px] md:text-[10px] font-bold text-[#006E33] uppercase tracking-wider hover:text-[#005326] transition-colors cursor-pointer flex items-center gap-1.5 px-3 py-1.5 bg-[#C4EED0] rounded-lg border border-[#A6D6B8] active:scale-95 shadow-sm">
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><polyline points="20 6 9 17 4 12"></polyline></svg>
                   Mark All as Returned
