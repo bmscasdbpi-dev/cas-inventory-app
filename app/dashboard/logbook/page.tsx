@@ -121,18 +121,15 @@ export default function LogbookPage() {
       const state = scannerRef.current.getState();
       try {
         if (state === 3) {
-          // Engine is paused, just resume
           await scannerRef.current.resume();
           console.log("Scanner resumed from pause.");
         } else if (state === 1 || !isCameraActive) {
-          // Engine is idle or camera state is off, force restart
           console.log("Scanner stopped/idle, restarting camera...");
           setIsCameraActive(false); 
-          await startScanner(); // Helper to re-init
+          await startScanner(); 
         }
       } catch (err) {
         console.warn("Safe resume failed, attempting full toggle:", err);
-        // Last resort: try to force a full start
         startScanner();
       }
     }, 200);
@@ -140,13 +137,18 @@ export default function LogbookPage() {
 
   /**
    * Internal helper to start or restart the scanner instance
+   * Uses a square qrbox to ensure logic matches the square UI ratio
    */
   const startScanner = async () => {
     if (!scannerRef.current) return;
     try {
       await scannerRef.current.start(
         { facingMode: "environment" },
-        { fps: 20, qrbox: { width: 250, height: 250 } },
+        { 
+          fps: 20, 
+          qrbox: { width: 250, height: 250 },
+          aspectRatio: 1.0 // Enforces square frame logic
+        },
         (text: string) => processQrResult(text),
         () => {}
       );
@@ -158,7 +160,6 @@ export default function LogbookPage() {
 
   /**
    * Generates a professional high-pitched scanner beep (Sine Wave at 1200Hz).
-   * Web Audio API is used to ensure zero latency.
    */
   const playScanSound = () => {
     try {
@@ -191,11 +192,7 @@ export default function LogbookPage() {
 
   // --- CORE LOGIC ---
 
-  /**
-   * Reusable scan processor with "Scan-and-Pause" flow.
-   */
   const processQrResult = async (decodedText: string) => {
-    // 1. Pause immediately to avoid rapid duplicate scans
     if (scannerRef.current && scannerRef.current.getState() === 2) {
       try {
         scannerRef.current.pause();
@@ -209,7 +206,6 @@ export default function LogbookPage() {
     const cleanCode = extractItemCode(decodedText);
     const { qrScannerMode, allItems, selectedItems, selectedBatch } = stateRef.current;
 
-    // --- MODE: ADDING ITEMS ---
     if (qrScannerMode === "add") {
       const found = allItems.find((i: any) => cleanCode === i.itemCode);
       if (found) {
@@ -226,7 +222,6 @@ export default function LogbookPage() {
       }
     }
 
-    // --- MODE: RETURNING ITEMS ---
     else if (qrScannerMode === "return") {
       const foundInBatch = selectedBatch?.items?.find((i: any) => i.itemCode === cleanCode);
       if (foundInBatch) {
@@ -255,7 +250,6 @@ export default function LogbookPage() {
     }
   };
 
-  // --- SUGGESTION LOGIC ---
   const SUGGESTION_MAP: Record<string, string[]> = {
     "CA-002-24": ["CA-008-24"],
     "CA-001-24": ["CA-007-24"],
@@ -271,7 +265,6 @@ export default function LogbookPage() {
     });
   });
 
-  // --- BATCH GROUPING LOGIC ---
   const groupedLogs = useMemo(() => {
     const groups: { [key: number]: any } = {};
     logs.forEach((log) => {
@@ -304,7 +297,6 @@ export default function LogbookPage() {
     );
   }, [logs, searchQuery]);
 
-  // --- PICKER FILTER LOGIC ---
   const filteredPickerItems = useMemo(() => {
     const filtered = allItems.filter((item) => {
       const matchesSearch =
@@ -316,7 +308,6 @@ export default function LogbookPage() {
     return filtered.sort((a, b) => a.id - b.id);
   }, [allItems, pickerSearch, activeCategory]);
 
-  // --- INITIALIZATION ---
   const fetchData = async () => {
     const [logsRes, itemsRes] = await Promise.all([getAllLogs(), getAllItems()]);
     if (logsRes.success) setLogs(logsRes.data);
@@ -335,7 +326,6 @@ export default function LogbookPage() {
     checkAuth();
   }, [router, supabase]);
 
-  // --- HANDLERS ---
   const handleToggleItem = (item: any) => {
     setSelectedItems((prev) =>
       prev.find((i) => i.id === item.id) ? prev.filter((i) => i.id !== item.id) : [...prev, item],
@@ -390,7 +380,7 @@ export default function LogbookPage() {
           const { Html5Qrcode } = await import("html5-qrcode");
           const scanner = new Html5Qrcode("reader");
           scannerRef.current = scanner;
-          await startScanner(); // Initial start
+          await startScanner(); 
         } catch (err) {
           console.error("Scanner error:", err);
         }
@@ -412,7 +402,6 @@ export default function LogbookPage() {
     const file = e.target.files?.[0];
     if (!file || !scannerRef.current) return;
     try {
-      // Library often stops camera during file processing
       if (scannerRef.current.isScanning) {
         await scannerRef.current.stop();
         setIsCameraActive(false);
@@ -422,7 +411,7 @@ export default function LogbookPage() {
       if (fileInputRef.current) fileInputRef.current.value = "";
     } catch (err) {
       alert("No QR Code found in this image.");
-      safeResume(); // Try to get camera back even on failure
+      safeResume(); 
     }
   };
 
@@ -1352,23 +1341,15 @@ export default function LogbookPage() {
 
             <div className="flex-1 overflow-y-auto custom-scrollbar p-8 pt-0 space-y-8">
               <div className="flex flex-col items-center">
-                {/* Updated Scanner Container: Removed blue border lines */}
+                {/* Updated Scanner Container: Borders and Crosshairs Removed */}
                 <div className="relative w-full aspect-square max-w-[380px] overflow-hidden rounded-[40px] bg-black shadow-2xl group">
                   <div id="reader" className="w-full h-full object-cover"></div>
                   
-                  {/* Scanner Overlay - Dimmed edges */}
+                  {/* Minimalist Scanner Overlay - Dimmed edges only, no borders */}
                   <div className="absolute inset-0 border-[40px] border-black/40 pointer-events-none"></div>
-                  
-                  {/* ENHANCED CROSSHAIR BORDERS (White, Thicker, and Larger) */}
-                  <div className="absolute top-10 left-10 w-14 h-14 border-t-[6px] border-l-[6px] border-white rounded-tl-2xl"></div>
-                  <div className="absolute top-10 right-10 w-14 h-14 border-t-[6px] border-r-[6px] border-white rounded-tr-2xl"></div>
-                  <div className="absolute bottom-10 left-10 w-14 h-14 border-b-[6px] border-l-[6px] border-white rounded-bl-2xl"></div>
-                  <div className="absolute bottom-10 right-10 w-14 h-14 border-b-[6px] border-r-[6px] border-white rounded-br-2xl"></div>
                   
                   {/* Scanning Animation Line */}
                   <div className="absolute top-0 left-0 w-full h-1 bg-white/50 shadow-[0_0_20px_rgba(255,255,255,0.8)] animate-scan z-10"></div>
-                  
-                  {/* REMOVED: Status Labels and Blinking Circle Indicators */}
                 </div>
 
                 <div className="flex gap-3 mt-6 w-full max-w-[380px]">
@@ -1451,7 +1432,6 @@ export default function LogbookPage() {
           </div>
         </div>
       )}
-	  
 	  
       {/* MODAL 3: ADD ITEM SCAN CONFIRMATION */}
       {showAddConfirmation && scannedItem && (
