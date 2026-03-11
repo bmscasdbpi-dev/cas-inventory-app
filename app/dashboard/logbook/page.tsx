@@ -109,7 +109,57 @@ export default function LogbookPage() {
 
   // --- HELPER FUNCTIONS ---
 
-  // Professional high-pitched scanner beep generation
+  /**
+   * Enhanced Safe Resume:
+   * 1. If paused (State 3), it resumes.
+   * 2. If stopped or idle (after file upload), it forces a restart via toggleCamera.
+   */
+  const safeResume = () => {
+    setTimeout(async () => {
+      if (!scannerRef.current) return;
+
+      const state = scannerRef.current.getState();
+      try {
+        if (state === 3) {
+          // Engine is paused, just resume
+          await scannerRef.current.resume();
+          console.log("Scanner resumed from pause.");
+        } else if (state === 1 || !isCameraActive) {
+          // Engine is idle or camera state is off, force restart
+          console.log("Scanner stopped/idle, restarting camera...");
+          setIsCameraActive(false); 
+          await startScanner(); // Helper to re-init
+        }
+      } catch (err) {
+        console.warn("Safe resume failed, attempting full toggle:", err);
+        // Last resort: try to force a full start
+        startScanner();
+      }
+    }, 200);
+  };
+
+  /**
+   * Internal helper to start or restart the scanner instance
+   */
+  const startScanner = async () => {
+    if (!scannerRef.current) return;
+    try {
+      await scannerRef.current.start(
+        { facingMode: "environment" },
+        { fps: 20, qrbox: { width: 250, height: 250 } },
+        (text: string) => processQrResult(text),
+        () => {}
+      );
+      setIsCameraActive(true);
+    } catch (err) {
+      console.error("Failed to start scanner:", err);
+    }
+  };
+
+  /**
+   * Generates a professional high-pitched scanner beep (Sine Wave at 1200Hz).
+   * Web Audio API is used to ensure zero latency.
+   */
   const playScanSound = () => {
     try {
       const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
@@ -117,7 +167,7 @@ export default function LogbookPage() {
       const gainNode = audioCtx.createGain();
 
       oscillator.type = "sine"; 
-      oscillator.frequency.setValueAtTime(1200, audioCtx.currentTime); // High pitch frequency
+      oscillator.frequency.setValueAtTime(1200, audioCtx.currentTime); 
       
       gainNode.gain.setValueAtTime(0.1, audioCtx.currentTime); 
       gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
@@ -141,14 +191,25 @@ export default function LogbookPage() {
 
   // --- CORE LOGIC ---
 
+  /**
+   * Reusable scan processor with "Scan-and-Pause" flow.
+   */
   const processQrResult = async (decodedText: string) => {
-    // 1. Play high-pitched electronic beep immediately
+    // 1. Pause immediately to avoid rapid duplicate scans
+    if (scannerRef.current && scannerRef.current.getState() === 2) {
+      try {
+        scannerRef.current.pause();
+      } catch (e) {
+        console.warn("Pause failed", e);
+      }
+    }
+
     playScanSound();
 
     const cleanCode = extractItemCode(decodedText);
     const { qrScannerMode, allItems, selectedItems, selectedBatch } = stateRef.current;
 
-    // --- LOGIC 1: ADDING ITEMS (BORROW MODE) ---
+    // --- MODE: ADDING ITEMS ---
     if (qrScannerMode === "add") {
       const found = allItems.find((i: any) => cleanCode === i.itemCode);
       if (found) {
@@ -160,10 +221,12 @@ export default function LogbookPage() {
           setScannedItem(found);
           setShowAddConfirmation(true);
         }
+      } else {
+        safeResume();
       }
     }
 
-    // --- LOGIC 2: RETURNING ITEMS (RETURN MODE) ---
+    // --- MODE: RETURNING ITEMS ---
     else if (qrScannerMode === "return") {
       const foundInBatch = selectedBatch?.items?.find((i: any) => i.itemCode === cleanCode);
       if (foundInBatch) {
@@ -172,13 +235,11 @@ export default function LogbookPage() {
         } else {
           const today = new Date().toISOString().split("T")[0];
           
-          // Update local state
           const updatedItems = selectedBatch.items.map((i: any) =>
             i.id === foundInBatch.id ? { ...i, requestStatus: "Returned", dateReturned: today } : i,
           );
           setSelectedBatch({ ...selectedBatch, items: updatedItems });
           
-          // Update Database
           await updateSingleLogEntry(foundInBatch.id, foundInBatch.itemId, {
             requestStatus: "Returned",
             dateReturned: today,
@@ -329,13 +390,7 @@ export default function LogbookPage() {
           const { Html5Qrcode } = await import("html5-qrcode");
           const scanner = new Html5Qrcode("reader");
           scannerRef.current = scanner;
-          await scanner.start(
-            { facingMode: "environment" },
-            { fps: 20, qrbox: { width: 250, height: 250 } },
-            (text) => processQrResult(text),
-            () => {},
-          );
-          setIsCameraActive(true);
+          await startScanner(); // Initial start
         } catch (err) {
           console.error("Scanner error:", err);
         }
@@ -357,6 +412,7 @@ export default function LogbookPage() {
     const file = e.target.files?.[0];
     if (!file || !scannerRef.current) return;
     try {
+      // Library often stops camera during file processing
       if (scannerRef.current.isScanning) {
         await scannerRef.current.stop();
         setIsCameraActive(false);
@@ -366,6 +422,7 @@ export default function LogbookPage() {
       if (fileInputRef.current) fileInputRef.current.value = "";
     } catch (err) {
       alert("No QR Code found in this image.");
+      safeResume(); // Try to get camera back even on failure
     }
   };
 
@@ -375,13 +432,7 @@ export default function LogbookPage() {
       await scannerRef.current.stop();
       setIsCameraActive(false);
     } else {
-      await scannerRef.current.start(
-        { facingMode: "environment" },
-        { fps: 20, qrbox: 250 },
-        (text: string) => processQrResult(text),
-        () => {},
-      );
-      setIsCameraActive(true);
+      await startScanner();
     }
   };
 
@@ -745,13 +796,13 @@ export default function LogbookPage() {
         </div>
       </main>
 
-      {/* MODAL: ADD RECORD */}
+ {/* MODAL: ADD RECORD */}
       {isAddModalOpen && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-          <div className="bg-white w-full max-w-4xl rounded-[40px] p-10 shadow-2xl border border-white/20 overflow-y-auto max-h-[95vh] custom-scrollbar relative">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm sm:p-4">
+          <div className="bg-white w-full h-full sm:h-auto sm:max-w-4xl sm:rounded-[40px] p-6 sm:p-10 shadow-2xl border border-white/20 overflow-y-auto sm:max-h-[95vh] custom-scrollbar relative">
             {/* LOADING OVERLAY */}
             {isSubmitting && (
-              <div className="absolute inset-0 bg-white/60 backdrop-blur-[2px] z-[110] flex flex-col items-center justify-center rounded-[40px] transition-all">
+              <div className="absolute inset-0 bg-white/60 backdrop-blur-[2px] z-[110] flex flex-col items-center justify-center sm:rounded-[40px] transition-all">
                 <div className="w-12 h-12 border-4 border-[#005FB7]/20 border-t-[#005FB7] rounded-full animate-spin mb-4"></div>
                 <p className="text-sm font-bold text-[#005FB7] uppercase tracking-wider animate-pulse">
                   Saving Batch Record...
@@ -759,9 +810,21 @@ export default function LogbookPage() {
               </div>
             )}
 
-            <h2 className="text-2xl font-bold mb-8 tracking-tight text-[#1A1C1E]">
-              New Request Record
-            </h2>
+            <div className="flex justify-between items-center mb-8">
+              <h2 className="text-2xl font-bold tracking-tight text-[#1A1C1E]">
+                New Request Record
+              </h2>
+              {/* Added a visible close button for mobile full-screen UX */}
+              <button 
+                onClick={() => setIsAddModalOpen(false)}
+                className="sm:hidden p-2 bg-[#F1F3F8] rounded-full"
+              >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="18" y1="6" x2="6" y2="18"></line>
+                  <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+              </button>
+            </div>
 
             <form onSubmit={handleSaveRecord} className="space-y-6">
               {/* INPUT FIELDS SECTION */}
@@ -822,7 +885,7 @@ export default function LogbookPage() {
                   />
                 </div>
 
-                {/* 5. Date Requested - 1/3 Width (Updated to auto-fill today) */}
+                {/* 5. Date Requested - 1/3 Width */}
                 <div className="space-y-2 md:col-span-2">
                   <label className="text-xs font-semibold text-black ml-1">
                     Date Requested
@@ -872,12 +935,12 @@ export default function LogbookPage() {
                   <h3 className="text-sm font-bold text-[#1A1C1E] uppercase tracking-wide">
                     Items to be borrowed ({selectedItems.length})
                   </h3>
-                  <div className="flex gap-2">
+                  <div className="flex gap-2 w-full sm:w-auto">
                     <button
                       type="button"
                       disabled={isSubmitting}
                       onClick={() => setIsItemPickerOpen(true)}
-                      className="flex items-center gap-2 px-5 py-2.5 bg-[#F1F3F8] text-[#005FB7] text-xs font-bold rounded-xl cursor-pointer transition-all hover:bg-[#D6E3FF] disabled:opacity-50"
+                      className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-5 py-2.5 bg-[#F1F3F8] text-[#005FB7] text-xs font-bold rounded-xl cursor-pointer transition-all hover:bg-[#D6E3FF] disabled:opacity-50"
                     >
                       Browse Items
                     </button>
@@ -888,7 +951,7 @@ export default function LogbookPage() {
                         setQrScannerMode("add");
                         setIsQRScannerOpen(true);
                       }}
-                      className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 text-white text-xs font-bold rounded-xl cursor-pointer transition-all hover:bg-blue-900 disabled:opacity-50"
+                      className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-5 py-2.5 bg-blue-600 text-white text-xs font-bold rounded-xl cursor-pointer transition-all hover:bg-blue-900 disabled:opacity-50"
                     >
                       Scan QR
                     </button>
@@ -915,7 +978,7 @@ export default function LogbookPage() {
                     </div>
                     <input
                       type="text"
-                      placeholder="Type item name or code to quickly add..."
+                      placeholder="Type item name or code..."
                       value={itemSearchText}
                       onChange={(e) => {
                         setItemSearchText(e.target.value);
@@ -985,15 +1048,6 @@ export default function LogbookPage() {
                                   >
                                     {item.itemCode}
                                   </span>
-                                  <span
-                                    className={`text-[10px] font-bold px-1.5 py-0.5 rounded uppercase ${
-                                      isAvailable
-                                        ? "bg-[#C4EED0] text-[#002107]"
-                                        : "bg-[#FAD2E1] text-[#7A0B2E]"
-                                    }`}
-                                  >
-                                    {item.availabilityStatus}
-                                  </span>
                                 </div>
                               </div>
                               <button
@@ -1026,7 +1080,7 @@ export default function LogbookPage() {
                       >
                         <path d="M11 3a1 1 0 10-2 0v1a1 1 0 102 0V3zM15.657 5.757a1 1 0 00-1.414-1.414l-.707.707a1 1 0 001.414 1.414l.707-.707zM18 10a1 1 0 01-1 1h-1a1 1 0 110-2h1a1 1 0 011 1zM5.05 6.464A1 1 0 106.464 5.05l-.707-.707a1 1 0 00-1.414 1.414l.707.707zM5 10a1 1 0 01-1 1H3a1 1 0 110-2h1a1 1 0 011 1zM8 16v-1h4v1a2 2 0 11-4 0zM12 14c.015-.34.208-.646.477-.859a4 4 0 10-4.954 0c.27.213.462.519.476.859h4.002z" />
                       </svg>
-                      Suggested based on your selection
+                      Suggestions
                     </h4>
                     <div className="flex flex-wrap gap-2">
                       {suggestedItems.map((item) => (
@@ -1038,13 +1092,8 @@ export default function LogbookPage() {
                           }
                           className="flex items-center gap-1.5 px-3 py-2 bg-white border border-[#005FB7]/20 rounded-xl text-xs font-bold text-[#1A1C1E] shadow-sm hover:bg-[#005FB7] hover:text-white hover:border-[#005FB7] transition-all group cursor-pointer"
                         >
-                          <span className="text-[#005FB7] group-hover:text-white mr-1 text-lg leading-none">
-                            +
-                          </span>
+                          <span className="text-[#005FB7] group-hover:text-white mr-1 text-lg leading-none">+</span>
                           {item.itemName}
-                          <span className="font-mono text-[10px] text-[#74777F] group-hover:text-blue-200">
-                            ({item.itemCode})
-                          </span>
                         </button>
                       ))}
                     </div>
@@ -1063,8 +1112,6 @@ export default function LogbookPage() {
                         <thead className="bg-[#EDF1FF] border-b border-[#D6E3FF]">
                           <tr className="text-xs font-bold uppercase text-[#44474E] tracking-wider">
                             <th className="px-6 py-4">Item Details</th>
-                            <th className="px-6 py-4">Serial No.</th>
-                            <th className="px-6 py-4">Condition</th>
                             <th className="px-6 py-4 text-center">Action</th>
                           </tr>
                         </thead>
@@ -1081,20 +1128,6 @@ export default function LogbookPage() {
                                 <p className="text-xs font-mono font-semibold text-[#005FB7]">
                                   {item.itemCode}
                                 </p>
-                              </td>
-                              <td className="px-6 py-4 text-[#44474E] font-medium">
-                                {item.serialNumber || "N/A"}
-                              </td>
-                              <td className="px-6 py-4">
-                                <span
-                                  className={`px-3 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider ${
-                                    item.deviceStatus === "Working"
-                                      ? "bg-green-100 text-green-700"
-                                      : "bg-orange-100 text-orange-700"
-                                  }`}
-                                >
-                                  {item.deviceStatus}
-                                </span>
                               </td>
                               <td className="px-6 py-4 text-center">
                                 <button
@@ -1122,7 +1155,7 @@ export default function LogbookPage() {
               </div>
 
               {/* ACTION BUTTONS */}
-              <div className="flex gap-4 pt-6">
+              <div className="flex flex-col sm:flex-row gap-4 pt-6">
                 <button
                   type="button"
                   disabled={isSubmitting}
@@ -1131,7 +1164,7 @@ export default function LogbookPage() {
                     setIsAddModalOpen(false);
                     setItemSearchText("");
                   }}
-                  className="flex-1 text-sm font-bold text-[#44474E] uppercase cursor-pointer hover:bg-[#F1F3F8] py-4 rounded-2xl transition-all disabled:opacity-50"
+                  className="w-full sm:flex-1 text-sm font-bold text-[#44474E] uppercase cursor-pointer hover:bg-[#F1F3F8] py-4 rounded-2xl transition-all disabled:opacity-50"
                 >
                   Cancel
                 </button>
@@ -1139,35 +1172,16 @@ export default function LogbookPage() {
                 <button
                   type="submit"
                   disabled={isSubmitting || selectedItems.length === 0}
-                  className="flex-[1.5] py-4 bg-[#005FB7] text-white rounded-2xl text-sm font-bold uppercase shadow-lg shadow-blue-200 cursor-pointer transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed overflow-hidden relative"
+                  className="w-full sm:flex-[1.5] py-4 bg-[#005FB7] text-white rounded-2xl text-sm font-bold uppercase shadow-lg shadow-blue-200 cursor-pointer transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <div className="flex items-center justify-center gap-3">
                     {isSubmitting ? (
                       <>
-                        <svg
-                          className="animate-spin h-4 w-4 text-white"
-                          xmlns="http://www.w3.org/2000/svg"
-                          fill="none"
-                          viewBox="0 0 24 24"
-                        >
-                          <circle
-                            className="opacity-25"
-                            cx="12"
-                            cy="12"
-                            r="10"
-                            stroke="currentColor"
-                            strokeWidth="4"
-                          ></circle>
-                          <path
-                            className="opacity-75"
-                            fill="currentColor"
-                            d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                          ></path>
-                        </svg>
-                        <span>Saving Record...</span>
+                        <svg className="animate-spin h-4 w-4 text-white" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                        <span>Saving...</span>
                       </>
                     ) : (
-                      <span>Confirm & Save Record</span>
+                      <span>Confirm & Save</span>
                     )}
                   </div>
                 </button>
@@ -1179,10 +1193,11 @@ export default function LogbookPage() {
 
 {/* MODAL 1: FIXED ITEM PICKER (CLEAN & SORTED OLDEST FIRST) */}
       {isItemPickerOpen && (
-        <div className="fixed inset-0 z-[210] flex items-center justify-center bg-black/60 backdrop-blur-md p-4 text-sm">
-          <div className="bg-white w-full max-w-5xl rounded-[40px] shadow-2xl flex flex-col lg:flex-row h-[85vh] overflow-hidden border border-white/20 relative">
+        <div className="fixed inset-0 z-[210] flex items-center justify-center bg-black/60 backdrop-blur-md sm:p-4 text-sm">
+          <div className="bg-white w-full h-full sm:h-[85vh] sm:max-w-5xl sm:rounded-[40px] shadow-2xl flex flex-col lg:flex-row overflow-hidden border border-white/20 relative">
+            
             {/* LEFT SIDE: SEARCH & SELECTION LIST */}
-            <div className="flex-1 flex flex-col p-8 border-r border-[#E0E2EC] min-w-0 bg-white">
+            <div className="flex-[1.5] flex flex-col p-6 sm:p-8 border-r border-[#E0E2EC] min-w-0 bg-white overflow-hidden">
               <div className="flex justify-between items-start mb-6">
                 <div>
                   <h3 className="font-bold text-2xl text-[#1A1C1E] tracking-normal">Select equipment</h3>
@@ -1215,7 +1230,7 @@ export default function LogbookPage() {
               </div>
 
               {/* CATEGORIES */}
-              <div className="flex gap-2 overflow-x-auto pb-4 mb-4 custom-scrollbar">
+              <div className="flex gap-2 overflow-x-auto pb-4 mb-4 custom-scrollbar shrink-0">
                 {categories.map((cat) => (
                   <button
                     key={cat}
@@ -1228,8 +1243,8 @@ export default function LogbookPage() {
                 ))}
               </div>
 
-              {/* ITEM LIST */}
-              <div className="flex-1 overflow-y-auto space-y-3 custom-scrollbar pr-2">
+              {/* ITEM LIST - ENABLED SCROLLING */}
+              <div className="flex-1 overflow-y-auto space-y-3 custom-scrollbar pr-2 min-h-0">
                 {filteredPickerItems.map((item) => {
                   const isSelected = selectedItems.find((i) => i.id === item.id);
                   const isAvailable = item.availabilityStatus === "Available";
@@ -1263,20 +1278,22 @@ export default function LogbookPage() {
               </div>
             </div>
 
-            {/* RIGHT SIDEBAR: SELECTED LIST */}
-            <div className="w-full lg:w-85 bg-[#F7F9FF] p-8 flex flex-col h-full border-t lg:border-t-0 border-[#E0E2EC]">
-              <div className="flex justify-between items-center mb-8">
-                <h4 className="font-bold text-sm text-[#74777F]">Selected list</h4>
-                <span className="bg-[#005FB7] text-white text-xs font-bold px-3 py-1 rounded-full">{selectedItems.length} items</span>
+            {/* RIGHT SIDEBAR: SELECTED LIST - ENABLED SCROLLING */}
+            <div className="w-full lg:w-96 bg-[#F7F9FF] p-6 sm:p-8 flex flex-col h-[40vh] lg:h-full border-t lg:border-t-0 border-[#E0E2EC] shrink-0">
+              <div className="flex justify-between items-center mb-6 shrink-0">
+                <h4 className="font-bold text-sm text-[#74777F] uppercase tracking-wider">Selected list</h4>
+                <span className="bg-[#005FB7] text-white text-xs font-black px-3 py-1 rounded-full shadow-md">
+                  {selectedItems.length} items
+                </span>
               </div>
 
-              <div className="flex-1 overflow-y-auto space-y-3 custom-scrollbar pr-1">
+              <div className="flex-1 overflow-y-auto space-y-3 custom-scrollbar pr-1 min-h-0">
                 {selectedItems.length === 0 ? (
                   <div className="h-full flex flex-col items-center justify-center text-center opacity-30">
-                    <p className="text-sm font-bold leading-tight">No items<br />selected yet</p>
+                    <p className="text-sm font-bold leading-tight uppercase tracking-widest">No items<br />selected yet</p>
                   </div>
                 ) : (
-                  selectedItems.map((item) => (
+                  [...selectedItems].reverse().map((item) => (
                     <div key={item.id} className="bg-white p-4 rounded-2xl shadow-sm border border-[#D6E3FF] flex justify-between items-center animate-in slide-in-from-right-4">
                       <div className="min-w-0">
                         <p className="font-bold text-sm truncate text-[#1A1C1E]">{item.itemName}</p>
@@ -1290,26 +1307,46 @@ export default function LogbookPage() {
                 )}
               </div>
 
-              <div className="pt-8 space-y-3">
-                <button onClick={() => setIsItemPickerOpen(false)} className="w-full py-5 bg-[#1A1C1E] text-white rounded-[24px] font-bold text-sm shadow-xl hover:bg-black transition-all cursor-pointer active:scale-95">Done selecting</button>
-                <button onClick={() => setSelectedItems([])} className="w-full text-xs font-bold text-[#74777F] hover:text-[#BA1A1A] cursor-pointer">Clear selection</button>
+              <div className="pt-6 space-y-3 shrink-0">
+                <button 
+                  onClick={() => setIsItemPickerOpen(false)} 
+                  className="w-full py-5 bg-[#1A1C1E] text-white sm:rounded-[24px] rounded-xl font-bold text-sm shadow-xl hover:bg-black transition-all cursor-pointer active:scale-95 uppercase tracking-widest"
+                >
+                  Done selecting
+                </button>
+                <button 
+                  onClick={() => setSelectedItems([])} 
+                  className="w-full text-xs font-bold text-[#74777F] hover:text-[#BA1A1A] cursor-pointer uppercase tracking-widest"
+                >
+                  Clear selection
+                </button>
               </div>
             </div>
           </div>
         </div>
       )}
 
-      {/* MODAL 2: ENHANCED CONTINUOUS QR SCANNER (SINGLE COLUMN REVAMP) */}
+{/* MODAL 2: ENHANCED CONTINUOUS QR SCANNER (SINGLE COLUMN REVAMP) */}
       {isQRScannerOpen && (
-        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 backdrop-blur-md p-4">
-          <div className="bg-white w-full max-w-xl rounded-[40px] flex flex-col h-[90vh] overflow-hidden shadow-2xl border border-white/20">
+        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 backdrop-blur-md sm:p-4">
+          <div className="bg-white w-full h-full sm:h-[90vh] sm:max-w-xl sm:rounded-[40px] flex flex-col overflow-hidden shadow-2xl border border-white/20">
             <div className="p-8 pb-4 bg-white flex justify-between items-start">
               <div>
-                <h3 className="font-bold text-2xl text-[#1A1C1E] tracking-tight">{qrScannerMode === "add" ? "Issuance Scanner" : "Return Scanner"}</h3>
-                <p className="text-xs text-[#74777F] font-medium">{qrScannerMode === "add" ? "Scanning items for a new borrow request." : "Scanning items to mark as returned."}</p>
+                <h3 className="font-bold text-2xl text-[#1A1C1E] tracking-tight">
+                  {qrScannerMode === "add" ? "Issuance Scanner" : "Return Scanner"}
+                </h3>
+                <p className="text-xs text-[#74777F] font-medium">
+                  {qrScannerMode === "add" ? "Scanning items for a new borrow request." : "Scanning items to mark as returned."}
+                </p>
               </div>
-              <button onClick={() => setIsQRScannerOpen(false)} className="p-3 bg-[#F1F3F8] rounded-full cursor-pointer hover:bg-[#E2E2E6] transition-colors">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+              <button 
+                onClick={() => setIsQRScannerOpen(false)} 
+                className="p-3 bg-[#F1F3F8] rounded-full cursor-pointer hover:bg-[#E2E2E6] transition-colors"
+              >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="18" y1="6" x2="6" y2="18"></line>
+                  <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
               </button>
             </div>
 
@@ -1325,20 +1362,34 @@ export default function LogbookPage() {
                   <div className="absolute top-0 left-0 w-full h-1.5 bg-[#005FB7] shadow-[0_0_20px_#005FB7] animate-scan z-10"></div>
                   <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-2 bg-black/60 backdrop-blur-md px-4 py-2 rounded-full border border-white/20">
                     <div className="w-2 h-2 bg-green-500 rounded-full animate-ping"></div>
-                    <span className="text-[10px] font-black text-white uppercase tracking-widest">{isCameraActive ? "Scanner Active" : "Camera Paused"}</span>
+                    <span className="text-[10px] font-black text-white uppercase tracking-widest">
+                      {isCameraActive ? "Scanner Active" : "Camera Paused"}
+                    </span>
                   </div>
                 </div>
 
                 <div className="flex gap-3 mt-6 w-full max-w-[380px]">
-                  <button onClick={toggleCamera} className={`flex-1 py-3 rounded-2xl text-[10px] font-black uppercase tracking-wider transition-all ${isCameraActive ? "bg-red-50 text-red-600 border border-red-100" : "bg-blue-600 text-white"} cursor-pointer`}>{isCameraActive ? "Stop Camera" : "Start Camera"}</button>
-                  <button onClick={() => fileInputRef.current?.click()} className="flex-1 py-3 bg-[#F1F3F8] text-[#44474E] rounded-2xl text-[10px] font-black uppercase tracking-wider border border-[#E0E2EC] cursor-pointer">Upload Image</button>
+                  <button 
+                    onClick={toggleCamera} 
+                    className={`flex-1 py-3 rounded-2xl text-[10px] font-black uppercase tracking-wider transition-all ${isCameraActive ? "bg-red-50 text-red-600 border border-red-100" : "bg-blue-600 text-white"} cursor-pointer`}
+                  >
+                    {isCameraActive ? "Stop Camera" : "Start Camera"}
+                  </button>
+                  <button 
+                    onClick={() => fileInputRef.current?.click()} 
+                    className="flex-1 py-3 bg-[#F1F3F8] text-[#44474E] rounded-2xl text-[10px] font-black uppercase tracking-wider border border-[#E0E2EC] cursor-pointer"
+                  >
+                    Upload Image
+                  </button>
                   <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleFileChange} />
                 </div>
               </div>
 
               <div className="bg-[#F7F9FF] rounded-[32px] p-6 border border-[#E0E2EC]">
                 <div className="flex justify-between items-center mb-6">
-                  <h4 className="font-black text-xs text-[#74777F] uppercase tracking-[0.2em]">{qrScannerMode === "add" ? "Items to Borrow" : "Items Returned"}</h4>
+                  <h4 className="font-black text-xs text-[#74777F] uppercase tracking-[0.2em]">
+                    {qrScannerMode === "add" ? "Items to Borrow" : "Items Returned"}
+                  </h4>
                   <div className="bg-[#005FB7] text-white text-[10px] font-black px-3 py-1 rounded-full shadow-lg shadow-blue-100">
                     {qrScannerMode === "add" ? selectedItems.length : selectedBatch?.items?.filter((i: any) => i.requestStatus === "Returned").length || 0} Items
                   </div>
@@ -1349,7 +1400,13 @@ export default function LogbookPage() {
                     const displayList = qrScannerMode === "add" ? selectedItems : selectedBatch?.items?.filter((i: any) => i.requestStatus === "Returned") || [];
                     if (displayList.length === 0) return (
                       <div className="py-8 flex flex-col items-center justify-center text-center opacity-30">
-                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#44474E" strokeWidth="1.5" className="mb-2"><path d="M3 7V5a2 2 0 0 1 2-2h2"></path><path d="M17 3h2a2 2 0 0 1 2 2v2"></path><path d="M21 17v2a2 2 0 0 1-2 2h-2"></path><path d="M7 21H5a2 2 0 0 1-2-2v-2"></path><rect x="7" y="7" width="10" height="10"></rect></svg>
+                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#44474E" strokeWidth="1.5" className="mb-2">
+                          <path d="M3 7V5a2 2 0 0 1 2-2h2"></path>
+                          <path d="M17 3h2a2 2 0 0 1 2 2v2"></path>
+                          <path d="M21 17v2a2 2 0 0 1-2 2h-2"></path>
+                          <path d="M7 21H5a2 2 0 0 1-2-2v-2"></path>
+                          <rect x="7" y="7" width="10" height="10"></rect>
+                        </svg>
                         <p className="text-[10px] font-black uppercase tracking-widest">Awaiting scans...</p>
                       </div>
                     );
@@ -1360,9 +1417,18 @@ export default function LogbookPage() {
                           <p className="text-[9px] font-mono font-bold text-[#005FB7]">{item.itemCode}</p>
                         </div>
                         {qrScannerMode === "add" ? (
-                          <button onClick={() => handleToggleItem(item)} className="p-2 text-[#BA1A1A] hover:bg-red-50 rounded-lg transition-all cursor-pointer"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></button>
+                          <button onClick={() => handleToggleItem(item)} className="p-2 text-[#BA1A1A] hover:bg-red-50 rounded-lg transition-all cursor-pointer">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+                              <line x1="18" y1="6" x2="6" y2="18"></line>
+                              <line x1="6" y1="6" x2="18" y2="18"></line>
+                            </svg>
+                          </button>
                         ) : (
-                          <div className="w-6 h-6 bg-green-100 text-green-600 rounded-full flex items-center justify-center"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="4"><polyline points="20 6 9 17 4 12"></polyline></svg></div>
+                          <div className="w-6 h-6 bg-green-100 text-green-600 rounded-full flex items-center justify-center">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="4">
+                              <polyline points="20 6 9 17 4 12"></polyline>
+                            </svg>
+                          </div>
                         )}
                       </div>
                     ));
@@ -1372,7 +1438,10 @@ export default function LogbookPage() {
             </div>
 
             <div className="p-8 bg-white border-t border-[#E0E2EC] space-y-4">
-              <button onClick={() => setIsQRScannerOpen(false)} className="w-full py-5 bg-[#1A1C1E] text-white rounded-[24px] font-black text-sm uppercase tracking-widest shadow-xl cursor-pointer hover:bg-black transition-all active:scale-95">
+              <button 
+                onClick={() => setIsQRScannerOpen(false)} 
+                className="w-full py-5 bg-[#1A1C1E] text-white sm:rounded-[24px] rounded-xl font-black text-sm uppercase tracking-widest shadow-xl cursor-pointer hover:bg-black transition-all active:scale-95"
+              >
                 {qrScannerMode === "add" ? "Done Scanning" : "Close Scanner"}
               </button>
             </div>
@@ -1397,10 +1466,24 @@ export default function LogbookPage() {
               <p className="text-xs font-mono font-bold text-[#005FB7]">{scannedItem.itemCode}</p>
             </div>
             <div className="flex gap-3">
-              <button onClick={() => { setShowAddConfirmation(false); setScannedItem(null); }} className="flex-1 py-4 bg-[#F1F3F8] text-[#44474E] rounded-2xl text-xs font-bold uppercase tracking-widest active:scale-95 transition-all">Cancel</button>
               <button 
-                onClick={() => { handleToggleItem(scannedItem); setShowAddConfirmation(false); setScannedItem(null); }}
-                className="flex-[1.5] py-4 bg-[#005FB7] text-white rounded-2xl text-xs font-bold uppercase tracking-widest shadow-lg shadow-blue-100 active:scale-95 transition-all"
+                onClick={() => { 
+                  setShowAddConfirmation(false); 
+                  setScannedItem(null); 
+                  safeResume(); 
+                }} 
+                className="flex-1 py-4 bg-[#F1F3F8] text-[#44474E] rounded-2xl text-xs font-bold uppercase tracking-widest active:scale-95 transition-all cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button 
+                onClick={() => { 
+                  handleToggleItem(scannedItem); 
+                  setShowAddConfirmation(false); 
+                  setScannedItem(null); 
+                  safeResume(); 
+                }}
+                className="flex-[1.5] py-4 bg-[#005FB7] text-white rounded-2xl text-xs font-bold uppercase tracking-widest shadow-lg shadow-blue-100 active:scale-95 transition-all cursor-pointer"
               >
                 Add to List
               </button>
@@ -1421,8 +1504,12 @@ export default function LogbookPage() {
               <p className="text-xs text-[#44474E] font-medium mt-1">Item <span className="font-bold">{scannedItem.itemCode}</span> has been marked as returned.</p>
             </div>
             <button 
-              onClick={() => { setShowReturnConfirmation(false); setScannedItem(null); }}
-              className="w-full py-4 bg-[#1A1C1E] text-white rounded-2xl text-xs font-bold active:scale-95 transition-all cursor-pointer"
+              onClick={() => { 
+                setShowReturnConfirmation(false); 
+                setScannedItem(null); 
+                safeResume(); 
+              }}
+              className="w-full py-4 bg-[#1A1C1E] text-white rounded-2xl text-xs font-bold active:scale-95 transition-all cursor-pointer uppercase tracking-widest"
             >
               Okay
             </button>
@@ -1430,7 +1517,7 @@ export default function LogbookPage() {
         </div>
       )}
 
-{/* ERROR MODAL: ITEM IN USE */}
+      {/* ERROR MODAL: ITEM IN USE */}
       {showInUseModal && (
         <div className="fixed inset-0 z-[250] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
           <div className="bg-white p-8 rounded-[32px] shadow-2xl max-w-xs w-full text-center space-y-5 animate-in zoom-in duration-200">
@@ -1441,7 +1528,15 @@ export default function LogbookPage() {
               <h4 className="text-lg font-black text-[#1A1C1E] uppercase">Item is Inused</h4>
               <p className="text-[#44474E] text-xs font-medium mt-1">This equipment is currently borrowed and has not been returned yet.</p>
             </div>
-            <button onClick={() => setShowInUseModal(false)} className="w-full py-3 bg-[#1A1C1E] text-white rounded-xl font-bold text-xs uppercase tracking-widest active:scale-95 transition-all">Understood</button>
+            <button 
+              onClick={() => { 
+                setShowInUseModal(false); 
+                safeResume(); 
+              }} 
+              className="w-full py-3 bg-[#1A1C1E] text-white rounded-xl font-bold text-xs uppercase tracking-widest active:scale-95 transition-all cursor-pointer"
+            >
+              Understood
+            </button>
           </div>
         </div>
       )}
@@ -1457,12 +1552,20 @@ export default function LogbookPage() {
               <h4 className="text-lg font-bold text-[#1A1C1E]">Item Not Found</h4>
               <p className="text-[#44474E] text-xs font-medium mt-1">The scanned item code does not match any items in this specific record batch.</p>
             </div>
-            <button onClick={() => setShowReturnErrorModal(false)} className="w-full py-3 bg-[#1A1C1E] text-white rounded-xl font-bold text-xs active:scale-95 transition-all cursor-pointer">Try Again</button>
+            <button 
+              onClick={() => { 
+                setShowReturnErrorModal(false); 
+                safeResume(); 
+              }} 
+              className="w-full py-3 bg-[#1A1C1E] text-white rounded-xl font-bold text-xs active:scale-95 transition-all cursor-pointer uppercase tracking-widest"
+            >
+              Try Again
+            </button>
           </div>
         </div>
       )}
 
-      {/* NEW ERROR MODAL: ITEM ALREADY ADDED (Issuance Mode) */}
+      {/* ERROR MODAL: ITEM ALREADY ADDED */}
       {showAlreadyAddedModal && (
         <div className="fixed inset-0 z-[270] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
           <div className="bg-white p-8 rounded-[32px] shadow-2xl max-w-xs w-full text-center space-y-5 animate-in zoom-in duration-200">
@@ -1476,8 +1579,11 @@ export default function LogbookPage() {
               <p className="text-[#44474E] text-xs font-medium mt-1">This item is already included in your current selection list.</p>
             </div>
             <button 
-              onClick={() => setShowAlreadyAddedModal(false)} 
-              className="w-full py-3 bg-[#005FB7] text-white rounded-xl font-bold text-xs active:scale-95 transition-all cursor-pointer"
+              onClick={() => { 
+                setShowAlreadyAddedModal(false); 
+                safeResume(); 
+              }} 
+              className="w-full py-3 bg-[#005FB7] text-white rounded-xl font-bold text-xs active:scale-95 transition-all cursor-pointer uppercase tracking-widest"
             >
               Close
             </button>
@@ -1485,7 +1591,7 @@ export default function LogbookPage() {
         </div>
       )}
 
-      {/* NEW ERROR MODAL: ITEM ALREADY RETURNED (Return Mode) */}
+      {/* ERROR MODAL: ITEM ALREADY RETURNED */}
       {showAlreadyReturnedModal && (
         <div className="fixed inset-0 z-[270] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
           <div className="bg-white p-8 rounded-[32px] shadow-2xl max-w-xs w-full text-center space-y-5 animate-in zoom-in duration-200">
@@ -1500,15 +1606,17 @@ export default function LogbookPage() {
               <p className="text-[#44474E] text-xs font-medium mt-1">This item has already been scanned and processed as returned in this batch.</p>
             </div>
             <button 
-              onClick={() => setShowAlreadyReturnedModal(false)} 
-              className="w-full py-3 bg-[#1A1C1E] text-white rounded-xl font-bold text-xs active:scale-95 transition-all cursor-pointer"
+              onClick={() => { 
+                setShowAlreadyReturnedModal(false); 
+                safeResume(); 
+              }} 
+              className="w-full py-3 bg-[#1A1C1E] text-white rounded-xl font-bold text-xs active:scale-95 transition-all cursor-pointer uppercase tracking-widest"
             >
               Understood
             </button>
           </div>
         </div>
       )}
-	  
 	  
       {/* MODAL 3: VIEW ALL RECORD / BATCH PREVIEW */}
       {isDetailModalOpen && selectedBatch && (
