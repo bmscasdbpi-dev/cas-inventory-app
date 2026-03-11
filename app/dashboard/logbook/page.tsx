@@ -1311,7 +1311,18 @@ export default function LogbookPage() {
 {/* MODAL 2: ENHANCED CONTINUOUS QR SCANNER (SINGLE COLUMN REVAMP) */}
       {isQRScannerOpen && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 backdrop-blur-md sm:p-4">
-          <div className="bg-white w-full h-full sm:h-[90vh] sm:max-w-xl sm:rounded-[40px] flex flex-col overflow-hidden shadow-2xl border border-white/20">
+          <div className="bg-white w-full h-full sm:h-[90vh] sm:max-w-xl sm:rounded-[40px] flex flex-col overflow-hidden shadow-2xl border border-white/20 relative">
+            
+            {/* LOADING OVERLAY: Appears during 'return' mode when saving changes */}
+            {isProcessing && (
+              <div className="absolute inset-0 bg-white/80 backdrop-blur-md z-[210] flex flex-col items-center justify-center animate-in fade-in duration-300">
+                <div className="w-16 h-16 border-4 border-[#F1F3F8] border-t-[#005FB7] rounded-full animate-spin mb-4"></div>
+                <p className="text-sm font-black text-[#1A1C1E] uppercase tracking-widest animate-pulse">
+                  Updating Record...
+                </p>
+              </div>
+            )}
+
             <div className="p-8 pb-4 bg-white flex justify-between items-start">
               <div>
                 <h3 className="font-bold text-2xl text-[#1A1C1E] tracking-tight">
@@ -1417,7 +1428,8 @@ export default function LogbookPage() {
             <div className="p-8 bg-white border-t border-[#E0E2EC] space-y-4">
               <button 
                 onClick={() => setIsQRScannerOpen(false)} 
-                className="w-full py-5 bg-[#1A1C1E] text-white sm:rounded-[24px] rounded-xl font-black text-sm uppercase tracking-widest shadow-xl cursor-pointer hover:bg-black transition-all active:scale-95"
+                className="w-full py-5 bg-[#1A1C1E] text-white sm:rounded-[24px] rounded-xl font-black text-sm uppercase tracking-widest shadow-xl cursor-pointer hover:bg-black transition-all active:scale-95 disabled:opacity-50"
+                disabled={isProcessing}
               >
                 {qrScannerMode === "add" ? "Done Scanning" : "Close Scanner"}
               </button>
