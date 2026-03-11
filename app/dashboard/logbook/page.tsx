@@ -117,14 +117,12 @@ export default function LogbookPage() {
       try {
         if (state === 3) {
           await scannerRef.current.resume();
-          console.log("Scanner resumed from pause.");
         } else if (state === 1 || !isCameraActive) {
-          console.log("Scanner stopped/idle, restarting camera...");
           setIsCameraActive(false); 
           await startScanner(); 
         }
       } catch (err) {
-        console.warn("Safe resume failed, attempting full toggle:", err);
+        console.warn("Safe resume failed:", err);
         startScanner();
       }
     }, 200);
@@ -150,8 +148,8 @@ export default function LogbookPage() {
   };
 
   /**
-   * Generates a loud, sharp "Supermarket" beep sound.
-   * Frequency increased to 2500Hz for that classic retail chirp.
+   * Generates a loud, punchy "Supermarket" beep sound.
+   * Lowered frequency to 1000Hz for a deeper retail "chirp."
    */
   const playScanSound = () => {
     try {
@@ -160,18 +158,18 @@ export default function LogbookPage() {
       const gainNode = audioCtx.createGain();
 
       oscillator.type = "sine"; 
-      oscillator.frequency.setValueAtTime(2500, audioCtx.currentTime); 
+      oscillator.frequency.setValueAtTime(1000, audioCtx.currentTime); 
       
-      // Fast attack and decay for a sharp "beep"
+      // Fast attack and decay with higher gain (0.5) for loudness
       gainNode.gain.setValueAtTime(0, audioCtx.currentTime);
-      gainNode.gain.linearRampToValueAtTime(0.2, audioCtx.currentTime + 0.01); 
-      gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
+      gainNode.gain.linearRampToValueAtTime(0.5, audioCtx.currentTime + 0.01); 
+      gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.15);
 
       oscillator.connect(gainNode);
       gainNode.connect(audioCtx.destination);
 
       oscillator.start();
-      oscillator.stop(audioCtx.currentTime + 0.12); 
+      oscillator.stop(audioCtx.currentTime + 0.15); 
     } catch (err) {
       console.error("Audio beep failed:", err);
     }
@@ -221,21 +219,34 @@ export default function LogbookPage() {
         if (foundInBatch.requestStatus === "Returned") {
           setShowAlreadyReturnedModal(true);
         } else {
+          // --- NEW: START LOADING/PROCESSING STATE ---
+          setIsProcessing(true);
           const today = new Date().toISOString().split("T")[0];
           
-          const updatedItems = selectedBatch.items.map((i: any) =>
-            i.id === foundInBatch.id ? { ...i, requestStatus: "Returned", dateReturned: today } : i,
-          );
-          setSelectedBatch({ ...selectedBatch, items: updatedItems });
-          
-          await updateSingleLogEntry(foundInBatch.id, foundInBatch.itemId, {
-            requestStatus: "Returned",
-            dateReturned: today,
-          });
-          
-          setScannedItem(foundInBatch);
-          setShowReturnConfirmation(true);
-          await fetchData();
+          try {
+            // Update database
+            await updateSingleLogEntry(foundInBatch.id, foundInBatch.itemId, {
+              requestStatus: "Returned",
+              dateReturned: today,
+            });
+
+            // Update local UI state
+            const updatedItems = selectedBatch.items.map((i: any) =>
+              i.id === foundInBatch.id ? { ...i, requestStatus: "Returned", dateReturned: today } : i,
+            );
+            setSelectedBatch({ ...selectedBatch, items: updatedItems });
+            
+            await fetchData(); // Refresh global data
+            
+            // --- FINISHED: SHOW SUCCESS ---
+            setIsProcessing(false);
+            setScannedItem(foundInBatch);
+            setShowReturnConfirmation(true);
+          } catch (error) {
+            console.error("Return failed:", error);
+            setIsProcessing(false);
+            safeResume();
+          }
         }
       } else {
         setShowReturnErrorModal(true);
@@ -787,7 +798,7 @@ export default function LogbookPage() {
               <div className="absolute inset-0 bg-white/60 backdrop-blur-[2px] z-[110] flex flex-col items-center justify-center sm:rounded-[40px] transition-all">
                 <div className="w-12 h-12 border-4 border-[#005FB7]/20 border-t-[#005FB7] rounded-full animate-spin mb-4"></div>
                 <p className="text-sm font-bold text-[#005FB7] uppercase tracking-wider animate-pulse">
-                  Saving Batch Record...
+                  Saving Record...
                 </p>
               </div>
             )}
@@ -1315,10 +1326,10 @@ export default function LogbookPage() {
             
             {/* LOADING OVERLAY: Appears during 'return' mode when saving changes */}
             {isProcessing && (
-              <div className="absolute inset-0 bg-white/80 backdrop-blur-md z-[210] flex flex-col items-center justify-center animate-in fade-in duration-300">
+              <div className="absolute inset-0 bg-white/90 z-[210] flex flex-col items-center justify-center animate-in fade-in duration-300">
                 <div className="w-16 h-16 border-4 border-[#F1F3F8] border-t-[#005FB7] rounded-full animate-spin mb-4"></div>
                 <p className="text-sm font-black text-[#1A1C1E] uppercase tracking-widest animate-pulse">
-                  Updating Record...
+                  Saving
                 </p>
               </div>
             )}
@@ -1514,7 +1525,7 @@ export default function LogbookPage() {
               <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
             </div>
             <div>
-              <h4 className="text-lg font-black text-[#1A1C1E] uppercase">Item is Inused</h4>
+              <h4 className="text-lg font-black text-[#1A1C1E] uppercase">Item is in used</h4>
               <p className="text-[#44474E] text-xs font-medium mt-1">This equipment is currently borrowed and has not been returned yet.</p>
             </div>
             <button 
