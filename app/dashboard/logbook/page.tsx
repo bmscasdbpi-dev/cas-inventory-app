@@ -150,8 +150,8 @@ export default function LogbookPage() {
   };
 
   /**
-   * Generates a loud, punchy "Supermarket" beep sound.
-   * Lowered frequency to 1000Hz for a deeper, authoritative retail "chirp".
+   * Generates a loud, sharp "Supermarket" beep sound.
+   * Frequency increased to 2500Hz for that classic retail chirp.
    */
   const playScanSound = () => {
     try {
@@ -160,18 +160,18 @@ export default function LogbookPage() {
       const gainNode = audioCtx.createGain();
 
       oscillator.type = "sine"; 
-      oscillator.frequency.setValueAtTime(1000, audioCtx.currentTime); 
+      oscillator.frequency.setValueAtTime(2500, audioCtx.currentTime); 
       
-      // Louder initial volume (0.5) with a very sharp attack/decay
+      // Fast attack and decay for a sharp "beep"
       gainNode.gain.setValueAtTime(0, audioCtx.currentTime);
-      gainNode.gain.linearRampToValueAtTime(0.5, audioCtx.currentTime + 0.01); 
-      gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.15);
+      gainNode.gain.linearRampToValueAtTime(0.2, audioCtx.currentTime + 0.01); 
+      gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
 
       oscillator.connect(gainNode);
       gainNode.connect(audioCtx.destination);
 
       oscillator.start();
-      oscillator.stop(audioCtx.currentTime + 0.15); 
+      oscillator.stop(audioCtx.currentTime + 0.12); 
     } catch (err) {
       console.error("Audio beep failed:", err);
     }
